@@ -185,15 +185,17 @@ object BuildErrorAutoFixer {
 
     val prompt = context.getString(R.string.ai_agent_autofix_prompt, truncate(output, 12_000))
 
-    val live = AIFixLiveProgress(context)
-    live.show(
-      title = "AI fixing build error",
-      errorOutput = output,
-      failedTask = lastTasks.firstOrNull(),
-      attempt = cyclesUsed,
-      maxAttempts = MAX_AUTO_CYCLES,
-    )
+    val providerLabel = buildString {
+      val providerName = manager.getCurrentProviderName()
+      if (providerName.isNotBlank()) append(providerName)
+      val modelName = manager.getCurrentModelName()
+      if (modelName.isNotBlank()) {
+        if (isNotEmpty()) append(" / ")
+        append(modelName)
+      }
+    }
 
+    val live = AIFixLiveProgress(context)
     val callback = live.callback { success, applied, _ ->
       if (!success) return@callback
       if (applied == 0) return@callback
@@ -213,9 +215,23 @@ object BuildErrorAutoFixer {
       }
     }
 
-    owner.lifecycleScope.launch {
+    var requestJob: kotlinx.coroutines.Job? = null
+    live.show(
+      title = "AI fixing build error",
+      errorOutput = output,
+      failedTask = lastTasks.firstOrNull(),
+      attempt = cyclesUsed,
+      maxAttempts = MAX_AUTO_CYCLES,
+      providerLabel = providerLabel.takeIf { it.isNotBlank() },
+      onCancelRequested = { requestJob?.cancel() },
+    )
+
+    requestJob = owner.lifecycleScope.launch {
       try {
         manager.executeRequest(prompt, callback)
+      } catch (e: kotlinx.coroutines.CancellationException) {
+        // Cancel button already informed the UI.
+        throw e
       } catch (e: Exception) {
         log.error("Auto-fix request failed", e)
         callback.onError(e.message ?: e.toString())

@@ -34,6 +34,10 @@ import java.util.Locale
 
 class AIFixLiveProgress(private val context: Context) {
 
+  companion object {
+    private const val WATCHDOG_MS = 30_000L
+  }
+
   private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.US)
 
   private val view: View =
@@ -56,6 +60,11 @@ class AIFixLiveProgress(private val context: Context) {
   private var streamedReply = ""
   private var lastReplyRender = 0L
   private var fileTouches = 0
+  private var lastEventAt = 0L
+  private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+  private var watchdog: Runnable? = null
+  private var onCancel: (() -> Unit)? = null
+  private var finished = false
 
   private var dialog: AlertDialog? = null
 
@@ -76,14 +85,25 @@ class AIFixLiveProgress(private val context: Context) {
     failedTask: String? = null,
     attempt: Int = 1,
     maxAttempts: Int = 1,
+    providerLabel: String? = null,
+    onCancelRequested: (() -> Unit)? = null,
   ) {
+    onCancel = onCancelRequested
+
     if (!errorOutput.isNullOrBlank()) {
       errorExcerpt.text = extractErrorTail(errorOutput)
     } else {
       errorExcerpt.text = "(Build output not captured.)"
     }
-    if (!failedTask.isNullOrBlank()) {
-      subStatus.text = "Failed task: $failedTask"
+    val sub = buildString {
+      if (!failedTask.isNullOrBlank()) append("Failed task: ").append(failedTask)
+      if (!providerLabel.isNullOrBlank()) {
+        if (isNotEmpty()) append("  •  ")
+        append("Using ").append(providerLabel)
+      }
+    }
+    if (sub.isNotEmpty()) {
+      subStatus.text = sub
       subStatus.visibility = View.VISIBLE
     }
     if (maxAttempts > 1) {
@@ -96,9 +116,21 @@ class AIFixLiveProgress(private val context: Context) {
         .setTitle(title)
         .setView(view)
         .setCancelable(false)
+        .setNeutralButton("Cancel", null)
         .setNegativeButton("Hide", null)
         .create()
     dialog?.show()
+
+    // Cancel button — abort the AI request without dismissing the dialog.
+    dialog?.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+      onCancel?.invoke()
+      runOnUi {
+        statusText.text = "Cancelled by user"
+        appendLog("Cancelled by user.", LogTag.WARN)
+        finish(success = false)
+        showOkButton()
+      }
+    }
 
     // Make the dialog tall enough that the user can actually see the live
     // progress without it overlapping the build output behind it.
@@ -109,6 +141,34 @@ class AIFixLiveProgress(private val context: Context) {
     }
 
     appendLog("Started — capturing build output and asking the AI…", LogTag.INFO)
+    if (!providerLabel.isNullOrBlank()) {
+      appendLog("Provider: $providerLabel", LogTag.INFO)
+    }
+    bumpWatchdog()
+  }
+
+  /**
+   * Reset the watchdog. If we don't receive ANY callback (chunk, file touch,
+   * onProcessing) for [WATCHDOG_MS], surface a hint to the user so they don't
+   * stare at "Analyzing your request…" forever.
+   */
+  private fun bumpWatchdog() {
+    lastEventAt = System.currentTimeMillis()
+    watchdog?.let { mainHandler.removeCallbacks(it) }
+    val cb = Runnable {
+      if (finished) return@Runnable
+      val idle = System.currentTimeMillis() - lastEventAt
+      if (idle >= WATCHDOG_MS) {
+        appendLog(
+          "No progress for ${idle / 1000}s. Provider may be slow / unreachable, or your API key may be invalid. You can tap Cancel and verify the key in Preferences → AI.",
+          LogTag.WARN,
+        )
+        statusText.text = "Still waiting on provider…"
+      }
+      bumpWatchdog()
+    }
+    watchdog = cb
+    mainHandler.postDelayed(cb, WATCHDOG_MS)
   }
 
   /** Build the AIAgentCallback that drives this UI. [onComplete] runs on the main thread. */
@@ -119,6 +179,7 @@ class AIFixLiveProgress(private val context: Context) {
       runOnUi {
         statusText.text = message
         appendLog(message, LogTag.INFO)
+        bumpWatchdog()
       }
     }
 
@@ -132,6 +193,7 @@ class AIFixLiveProgress(private val context: Context) {
         updateFileCount()
         statusText.text = "Modifying $fileName"
         appendLog("Modifying $filePath", LogTag.FILE)
+        bumpWatchdog()
       }
     }
 
@@ -142,12 +204,14 @@ class AIFixLiveProgress(private val context: Context) {
           if (success) "Wrote $fileName" else "Failed $fileName",
           if (success) LogTag.SUCCESS else LogTag.ERROR,
         )
+        bumpWatchdog()
       }
     }
 
     override fun onStreamChunk(delta: String, fullSoFar: String) {
       streamedReply = fullSoFar
       val now = System.currentTimeMillis()
+      lastEventAt = now
       if (now - lastReplyRender < 80) return
       lastReplyRender = now
       runOnUi {
@@ -231,14 +295,20 @@ class AIFixLiveProgress(private val context: Context) {
   }
 
   private fun finish(success: Boolean) {
+    finished = true
     spinner.visibility = View.GONE
     progressBar.visibility = View.GONE
+    watchdog?.let { mainHandler.removeCallbacks(it) }
+    watchdog = null
     if (!success) {
       attemptChip.visibility = View.GONE
     }
   }
 
   private fun showOkButton() {
+    // After completion the request can no longer be cancelled — hide that
+    // button and rename "Hide" to "OK" so the dialog can be dismissed.
+    dialog?.getButton(AlertDialog.BUTTON_NEUTRAL)?.visibility = View.GONE
     dialog?.getButton(AlertDialog.BUTTON_NEGATIVE)?.text = "OK"
   }
 
@@ -271,20 +341,53 @@ class AIFixLiveProgress(private val context: Context) {
   }
 
   private fun extractErrorTail(output: String): String {
-    val lines = output.lines()
-    val errorIdx = lines.indexOfLast { line ->
-      line.contains("error:", ignoreCase = true) ||
-        line.startsWith("e: ") ||
-        line.contains("FAILED", ignoreCase = false)
+    val rawLines = output.lines()
+
+    // Skip Gradle's standard "What went wrong / Try / Get more help / Deprecated"
+    // boilerplate that appears AFTER the actual compiler errors and dilutes the
+    // signal in the dialog.
+    fun isNoise(line: String): Boolean {
+      val l = line.trim()
+      return l.startsWith("> Run with ") ||
+        l.startsWith("> Get more help ") ||
+        l.startsWith("> Try:") ||
+        l.startsWith("Deprecated Gradle features ") ||
+        l.startsWith("You can use '--warning-mode") ||
+        l.startsWith("For more on this, please refer") ||
+        l.startsWith("BUILD FAILED in ") ||
+        l.startsWith("[Incubating]") ||
+        l.startsWith("* Try:") ||
+        l.startsWith("* Get more help") ||
+        l.matches(Regex("\\d+ actionable tasks?:.*"))
     }
-    val window = if (errorIdx >= 0) {
-      val from = (errorIdx - 5).coerceAtLeast(0)
-      val to = (errorIdx + 6).coerceAtMost(lines.size)
-      lines.subList(from, to)
+
+    fun isError(line: String): Boolean {
+      val l = line.trimStart()
+      return l.startsWith("e: ") ||
+        l.startsWith("error: ") ||
+        l.contains("> Compilation error.") ||
+        l.startsWith("> What went wrong:") ||
+        l.startsWith("> Task ") && l.contains("FAILED")
+    }
+
+    val errorLines = rawLines.filter { isError(it) }
+    if (errorLines.isNotEmpty()) {
+      // Prefer showing the actual e:/error: lines, deduped, max 12.
+      return errorLines.distinct().take(12).joinToString("\n").take(2000)
+    }
+
+    // Fallback: take a window around the last real "FAILED" task and strip noise.
+    val failedTaskIdx = rawLines.indexOfLast { it.contains("> Task ") && it.contains("FAILED") }
+    val window = if (failedTaskIdx >= 0) {
+      val from = (failedTaskIdx - 4).coerceAtLeast(0)
+      val to = (failedTaskIdx + 12).coerceAtMost(rawLines.size)
+      rawLines.subList(from, to)
     } else {
-      lines.takeLast(12)
+      rawLines.takeLast(20)
     }
-    return window.joinToString("\n").take(2000)
+    val cleaned = window.filterNot { isNoise(it) }
+    val final = if (cleaned.isEmpty()) window else cleaned
+    return final.joinToString("\n").take(2000)
   }
 
   private fun runOnUi(block: () -> Unit) {
