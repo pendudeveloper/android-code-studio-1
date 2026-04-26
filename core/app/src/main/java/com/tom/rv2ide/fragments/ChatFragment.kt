@@ -94,6 +94,8 @@ class ChatFragment(
         stopCompletionStateMonitoring()
     }
 
+    private lateinit var copyResponseBtn: MaterialButton
+
     private fun initializeViews(view: View) {
         promptInput = view.findViewById(R.id.anyText)
         executeBtn = view.findViewById(R.id.executeBtn)
@@ -103,6 +105,15 @@ class ChatFragment(
         progressIndicator = view.findViewById(R.id.progressIndicator)
         fileModificationList = view.findViewById(R.id.fileModificationList)
         summaryCard = view.findViewById(R.id.summaryCard)
+        copyResponseBtn = view.findViewById(R.id.copyResponseBtn)
+        copyResponseBtn.setOnClickListener {
+            val ctx = requireContext()
+            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                as android.content.ClipboardManager
+            val text = statusText.text?.toString().orEmpty()
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("AI response", text))
+            android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun setupRecyclerView() {

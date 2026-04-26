@@ -136,7 +136,7 @@ class EditorBuildEventListener : GradleBuildService.EventListener {
     // user has disabled auto-fix or has no API keys configured.
     try {
       val projectPath = IProjectManager.getInstance().projectDirPath
-      BuildErrorAutoFixer.onBuildFailed(activity, projectPath)
+      BuildErrorAutoFixer.onBuildFailed(activity, projectPath, tasks)
     } catch (e: Exception) {
       log.warn("AI auto-fix could not be triggered", e)
     }

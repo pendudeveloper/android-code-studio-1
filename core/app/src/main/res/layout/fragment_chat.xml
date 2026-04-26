@@ -132,6 +132,22 @@
                             app:indicatorSize="20dp"
                             style="@style/Widget.Material3.CircularProgressIndicator" />
 
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/copyResponseBtn"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:minWidth="0dp"
+                            android:minHeight="0dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:contentDescription="Copy"
+                            android:text="Copy"
+                            app:icon="@android:drawable/ic_menu_save"
+                            app:iconSize="16dp"
+                            app:iconPadding="4dp"
+                            style="@style/Widget.Material3.Button.TextButton" />
+
                     </LinearLayout>
 
                     <com.google.android.material.textview.MaterialTextView

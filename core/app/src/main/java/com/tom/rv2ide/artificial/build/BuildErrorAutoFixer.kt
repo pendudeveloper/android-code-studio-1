@@ -26,8 +26,12 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.tom.rv2ide.R
 import com.tom.rv2ide.artificial.agents.AIAgentManager
 import com.tom.rv2ide.artificial.secrets.ApiKey
+import com.tom.rv2ide.lookup.Lookup
 import com.tom.rv2ide.preferences.internal.prefManager
+import com.tom.rv2ide.projects.builder.BuildService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
 
 /**
@@ -38,6 +42,10 @@ import org.slf4j.LoggerFactory
  * the build fails. The fixer reads the
  * [`ai_agent_autofix_build`][AUTOFIX_PREF] preference and only triggers when both the
  * preference is enabled and at least one AI provider has a valid API key.
+ *
+ * When [`ai_agent_autofix_loop`][AUTOFIX_LOOP_PREF] is enabled, after the AI applies
+ * a fix the same Gradle tasks are re-executed automatically — up to [MAX_AUTO_CYCLES]
+ * attempts per user-initiated build. The cycle counter resets in [reset].
  */
 object BuildErrorAutoFixer {
 
@@ -46,8 +54,12 @@ object BuildErrorAutoFixer {
   /** Cap the captured build output. We don't need megabytes of Gradle progress noise. */
   private const val MAX_LINES = 400
   private const val AUTOFIX_PREF = "ai_agent_autofix_build"
+  private const val AUTOFIX_LOOP_PREF = "ai_agent_autofix_loop"
+  private const val MAX_AUTO_CYCLES = 3
 
   private val recentLines = ArrayDeque<String>(MAX_LINES)
+  @Volatile private var lastTasks: List<String> = emptyList()
+  @Volatile private var cyclesUsed: Int = 0
 
   /** Fired by the build event listener for every line of build output. */
   @Synchronized
@@ -63,6 +75,8 @@ object BuildErrorAutoFixer {
   @Synchronized
   fun reset() {
     recentLines.clear()
+    cyclesUsed = 0
+    lastTasks = emptyList()
   }
 
   /** Snapshot of the captured output, oldest first. */
@@ -72,14 +86,22 @@ object BuildErrorAutoFixer {
   /** Whether auto-fix is enabled in user preferences. */
   fun isEnabled(): Boolean = prefManager.getBoolean(AUTOFIX_PREF, true)
 
+  /** Whether the auto-rebuild loop is enabled. Defaults to off until the user opts in. */
+  fun isLoopEnabled(): Boolean = prefManager.getBoolean(AUTOFIX_LOOP_PREF, false)
+
   /**
    * Called by [com.tom.rv2ide.handlers.EditorBuildEventListener] when the build fails.
    *
-   * Shows a dialog with the option to ask the AI Agent to fix the failure. If
-   * auto-fix is disabled, this is a no-op so the rest of the existing failure-handling
-   * UI remains undisturbed.
+   * - First failure of a build session: shows the user-facing dialog asking whether
+   *   to invoke the AI agent.
+   * - Subsequent failures while we are still under [MAX_AUTO_CYCLES]: silently
+   *   re-runs the AI fix and re-triggers the build (only when loop mode is enabled).
    */
-  fun onBuildFailed(activity: Activity, projectRoot: String?) {
+  fun onBuildFailed(
+    activity: Activity,
+    projectRoot: String?,
+    failedTasks: List<String?> = emptyList()
+  ) {
     if (!isEnabled()) return
     if (!ApiKey.hasAnyApiKey()) {
       log.info("AI auto-fix skipped: no API key configured")
@@ -92,9 +114,40 @@ object BuildErrorAutoFixer {
 
     val owner = activity as? LifecycleOwner ?: return
 
+    val tasks = failedTasks.filterNotNull().filter { it.isNotBlank() }
+    if (tasks.isNotEmpty()) lastTasks = tasks
+
+    if (cyclesUsed > 0 && isLoopEnabled() && cyclesUsed < MAX_AUTO_CYCLES) {
+      // Still inside the auto-loop budget — skip the prompt and try another fix.
+      Toast.makeText(
+        activity,
+        "AI auto-fix retry ${cyclesUsed + 1}/$MAX_AUTO_CYCLES",
+        Toast.LENGTH_SHORT
+      ).show()
+      runFix(activity, owner, projectRoot, output)
+      return
+    }
+
+    if (cyclesUsed >= MAX_AUTO_CYCLES) {
+      log.info("AI auto-fix loop budget exhausted ($cyclesUsed cycles)")
+      Toast.makeText(
+        activity,
+        "AI auto-fix gave up after $MAX_AUTO_CYCLES attempts",
+        Toast.LENGTH_LONG
+      ).show()
+      return
+    }
+
+    val message = if (isLoopEnabled()) {
+      "${activity.getString(R.string.ai_agent_autofix_build_summary)}\n\n" +
+          "Auto-rebuild loop is on (max $MAX_AUTO_CYCLES attempts)."
+    } else {
+      activity.getString(R.string.ai_agent_autofix_build_summary)
+    }
+
     MaterialAlertDialogBuilder(activity)
       .setTitle(R.string.ai_agent_autofix_build)
-      .setMessage(R.string.ai_agent_autofix_build_summary)
+      .setMessage(message)
       .setPositiveButton(R.string.ai_agent_autofix_build) { dialog, _ ->
         dialog.dismiss()
         Toast.makeText(activity, R.string.ai_agent_autofix_started, Toast.LENGTH_SHORT).show()
@@ -110,10 +163,9 @@ object BuildErrorAutoFixer {
     projectRoot: String?,
     output: String
   ) {
+    cyclesUsed += 1
+
     val manager = AIAgentManager(context)
-    // The manager defaults to Gemini in its constructor; if that has no valid key, fall
-    // back to the user's currently selected provider, then to whichever provider has a
-    // configured API key.
     if (manager.getCurrentAgent() == null) {
       val agents = com.tom.rv2ide.artificial.agents.Agents(context)
       val preferred = agents.getProvider()
@@ -153,18 +205,36 @@ object BuildErrorAutoFixer {
             modifications: List<AIAgentManager.ModificationResult>,
             summary: AIAgentManager.ModificationSummary
           ) {
-            Toast.makeText(
-              context,
-              "AI applied ${modifications.size} fix(es). Re-run the build.",
-              Toast.LENGTH_LONG
-            ).show()
+            val applied = modifications.count { it.success }
+            if (applied == 0) {
+              Toast.makeText(
+                context,
+                "AI couldn't apply any fix automatically.",
+                Toast.LENGTH_LONG
+              ).show()
+              return
+            }
+
+            if (isLoopEnabled() && cyclesUsed <= MAX_AUTO_CYCLES) {
+              Toast.makeText(
+                context,
+                "AI applied $applied fix(es). Re-running build (cycle $cyclesUsed/$MAX_AUTO_CYCLES)…",
+                Toast.LENGTH_LONG
+              ).show()
+              owner.lifecycleScope.launch { rerunLastBuild(context) }
+            } else {
+              Toast.makeText(
+                context,
+                "AI applied $applied fix(es). Re-run the build.",
+                Toast.LENGTH_LONG
+              ).show()
+            }
           }
 
           override fun onTextResponse(
             response: String,
             summary: AIAgentManager.ModificationSummary
           ) {
-            // Show the explanation but don't claim a fix was applied.
             MaterialAlertDialogBuilder(context)
               .setTitle("AI suggestion")
               .setMessage(response.take(4000))
@@ -184,6 +254,27 @@ object BuildErrorAutoFixer {
         log.error("Auto-fix request failed", e)
         Toast.makeText(context, "AI auto-fix failed: ${e.message}", Toast.LENGTH_LONG).show()
       }
+    }
+  }
+
+  /** Re-run the last failed Gradle tasks. Best-effort — silently no-ops if no service. */
+  private suspend fun rerunLastBuild(context: Context) {
+    val tasks = lastTasks
+    if (tasks.isEmpty()) {
+      log.warn("Auto-rebuild skipped: no previous task list captured")
+      return
+    }
+    val service = Lookup.getDefault().lookup(BuildService.KEY_BUILD_SERVICE)
+    if (service == null) {
+      log.warn("Auto-rebuild: BuildService not available")
+      return
+    }
+    try {
+      withContext(Dispatchers.IO) {
+        service.executeTasks(*tasks.toTypedArray())
+      }
+    } catch (e: Throwable) {
+      log.warn("Auto-rebuild failed to re-trigger tasks: ${e.message}")
     }
   }
 

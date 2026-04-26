@@ -54,6 +54,7 @@ private class AIAgentConfig(
   @IgnoredOnParcel private var openRouterApiKeyPref: OpenRouterApiKey? = null
   @IgnoredOnParcel private var openRouterModelPref: OpenRouterCustomModel? = null
   @IgnoredOnParcel private var autoFixBuildPref: AutoFixBuildErrors? = null
+  @IgnoredOnParcel private var autoFixLoopPref: AutoFixBuildLoop? = null
 
   init {
     val aiAgentEnabled = AIAgentEnabled { isEnabled -> updateApiKeyPreferencesState(isEnabled) }
@@ -66,6 +67,7 @@ private class AIAgentConfig(
     openRouterApiKeyPref = OpenRouterApiKey()
     openRouterModelPref = OpenRouterCustomModel()
     autoFixBuildPref = AutoFixBuildErrors()
+    autoFixLoopPref = AutoFixBuildLoop()
 
     addPreference(aiAgentEnabled)
     addPreference(geminiApiKeyPref!!)
@@ -76,6 +78,7 @@ private class AIAgentConfig(
     addPreference(openRouterApiKeyPref!!)
     addPreference(openRouterModelPref!!)
     addPreference(autoFixBuildPref!!)
+    addPreference(autoFixLoopPref!!)
   }
 
   private fun updateApiKeyPreferencesState(isEnabled: Boolean) {
@@ -87,6 +90,7 @@ private class AIAgentConfig(
     openRouterApiKeyPref?.setEnabled(isEnabled)
     openRouterModelPref?.setEnabled(isEnabled)
     autoFixBuildPref?.setEnabled(isEnabled)
+    autoFixLoopPref?.setEnabled(isEnabled)
   }
 }
 
@@ -517,6 +521,33 @@ private class AutoFixBuildErrors(
       key = "ai_agent_autofix_build"
       title = context.getString(R.string.ai_agent_autofix_build)
       summary = context.getString(R.string.ai_agent_autofix_build_summary)
+      isEnabled = prefManager.getBoolean("ai_agent_enabled", false)
+    }
+    preference = pref
+    return pref
+  }
+
+  fun setEnabled(enabled: Boolean) {
+    preference?.isEnabled = enabled
+  }
+}
+
+@Parcelize
+private class AutoFixBuildLoop(
+    override val key: String = "ai_agent_autofix_loop",
+    override val title: Int = R.string.ai_agent_autofix_loop,
+) : SwitchPreference(
+    setValue = { value -> prefManager.putBoolean("ai_agent_autofix_loop", value) },
+    getValue = { prefManager.getBoolean("ai_agent_autofix_loop", false) },
+) {
+
+  @IgnoredOnParcel private var preference: Preference? = null
+
+  override fun onCreatePreference(context: Context): Preference {
+    val pref = super.onCreatePreference(context).apply {
+      key = "ai_agent_autofix_loop"
+      title = context.getString(R.string.ai_agent_autofix_loop)
+      summary = context.getString(R.string.ai_agent_autofix_loop_summary)
       isEnabled = prefManager.getBoolean("ai_agent_enabled", false)
     }
     preference = pref

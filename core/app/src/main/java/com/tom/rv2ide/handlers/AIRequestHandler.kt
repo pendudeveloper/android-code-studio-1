@@ -1,6 +1,10 @@
 package com.tom.rv2ide.handlers
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.view.View
+import android.widget.Toast
 import androidx.lifecycle.LifecycleCoroutineScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.progressindicator.CircularProgressIndicator
@@ -9,6 +13,7 @@ import androidx.recyclerview.widget.RecyclerView
 import android.widget.LinearLayout
 import com.tom.rv2ide.adapters.FileModificationAdapter
 import com.tom.rv2ide.artificial.agents.AIAgentManager
+import com.tom.rv2ide.artificial.text.MarkdownRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -141,7 +146,14 @@ class AIRequestHandler(
     private fun handleTextResponse(response: String) {
         progressIndicator.visibility = View.GONE
         executeBtn.isEnabled = true
-        statusText.text = response
+        statusText.text = MarkdownRenderer.render(response)
+        statusText.setOnLongClickListener {
+            val ctx = statusText.context
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("AI response", response))
+            Toast.makeText(ctx, "Copied AI response", Toast.LENGTH_SHORT).show()
+            true
+        }
         summaryCard.visibility = View.GONE
         fileModificationList.visibility = View.GONE
     }
