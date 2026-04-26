@@ -126,6 +126,10 @@ class AIAgentManager(private val context: Context) {
         currentAgent?.setProjectData(projectTree)
         permissionManager.addAllowedDirectory(projectRoot.absolutePath)
 
+        // Load any per-project AI notes (.aistudio/memory.md) so providers see them.
+        com.tom.rv2ide.artificial.rules.WritingRules.projectMemory =
+            com.tom.rv2ide.artificial.rules.ProjectMemory.read(projectRoot)
+
         return true
     }
 

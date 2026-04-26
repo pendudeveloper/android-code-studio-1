@@ -14,6 +14,8 @@ import android.widget.LinearLayout
 import com.tom.rv2ide.adapters.FileModificationAdapter
 import com.tom.rv2ide.artificial.agents.AIAgentManager
 import com.tom.rv2ide.artificial.text.MarkdownRenderer
+import com.tom.rv2ide.artificial.usage.SessionLog
+import com.tom.rv2ide.artificial.usage.UsageTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -49,7 +51,8 @@ class AIRequestHandler(
                     fileModificationAdapter.clear()
                     fileModificationList.visibility = View.GONE
                 }
-                
+
+                SessionLog.add(SessionLog.Entry("user", userRequest))
                 executeAIRequest(userRequest)
                 
             } catch (e: Exception) {
@@ -129,6 +132,7 @@ class AIRequestHandler(
     ) {
         progressIndicator.visibility = View.GONE
         statusText.text = "✅ Operation completed"
+        SessionLog.add(SessionLog.Entry("assistant", response, model = UsageTracker.last?.model))
         summaryText.text = buildSummaryText(summary)
         summaryCard.visibility = View.VISIBLE
         
@@ -146,6 +150,7 @@ class AIRequestHandler(
     private fun handleTextResponse(response: String) {
         progressIndicator.visibility = View.GONE
         executeBtn.isEnabled = true
+        SessionLog.add(SessionLog.Entry("assistant", response, model = UsageTracker.last?.model))
         statusText.text = MarkdownRenderer.render(response)
         statusText.setOnLongClickListener {
             val ctx = statusText.context
@@ -179,7 +184,13 @@ Please check the error message and try again.
             builder.append("❌ Failed: ${summary.failedFiles}\n")
         }
         builder.append("🆕 New Files: ${summary.newFiles}\n")
-        builder.append("✏️ Modified Files: ${summary.modifiedFiles}\n\n")
+        builder.append("✏️ Modified Files: ${summary.modifiedFiles}\n")
+
+        UsageTracker.last?.let { usage ->
+            builder.append("🔢 Tokens: ${usage.promptTokens} in / ${usage.completionTokens} out")
+                .append("  •  session total: ${UsageTracker.totalTokens()}\n")
+        }
+        builder.append('\n')
         
         builder.append("Files:\n")
         summary.fileDetails.forEach { detail ->

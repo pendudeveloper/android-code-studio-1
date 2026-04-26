@@ -278,6 +278,7 @@ class IDEApplication : TermuxApplication() {
 
   private fun handleCrash(thread: Thread, th: Throwable) {
     // writeException(th)
+    persistLastCrash(th)
 
     try {
 
@@ -294,6 +295,19 @@ class IDEApplication : TermuxApplication() {
     } catch (error: Throwable) {
       Log.e("IDEApplication", "Unable to show crash handler activity", error)
     }
+  }
+
+  private fun persistLastCrash(th: Throwable) {
+    try {
+      val dir = java.io.File(filesDir, "ai_crash")
+      if (!dir.exists()) dir.mkdirs()
+      val sw = java.io.StringWriter()
+      th.printStackTrace(java.io.PrintWriter(sw))
+      java.io.File(dir, "last.txt").writeText(
+        "Crash @ " + java.util.Date().toString() + "
+" + sw.toString()
+      )
+    } catch (_: Throwable) { }
   }
 
   private fun cancelStatUploadWorker() {

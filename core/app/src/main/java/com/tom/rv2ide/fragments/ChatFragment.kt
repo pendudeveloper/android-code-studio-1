@@ -34,6 +34,7 @@ class ChatFragment(
     private lateinit var promptInput: TextInputEditText
     private lateinit var executeBtn: MaterialButton
     private lateinit var clearBtn: MaterialButton
+    private lateinit var exportBtn: MaterialButton
     private lateinit var statusText: MaterialTextView
     private lateinit var summaryText: MaterialTextView
     private lateinit var progressIndicator: CircularProgressIndicator
@@ -80,6 +81,26 @@ class ChatFragment(
         setupListeners()
         loadProject()
         registerPreferenceListener()
+        offerCrashAnalysis()
+    }
+
+    private fun offerCrashAnalysis() {
+        val ctx = context ?: return
+        if (!com.tom.rv2ide.artificial.usage.CrashStash.hasUnreadCrash(ctx)) return
+        val trace = com.tom.rv2ide.artificial.usage.CrashStash.consume(ctx) ?: return
+        val snippet = trace.lineSequence().take(12).joinToString("\n").take(1200)
+        val current = promptInput.text?.toString().orEmpty()
+        if (current.isBlank()) {
+            promptInput.setText(
+                buildString {
+                    append("The app just crashed. Please analyse this stack trace, ")
+                    append("explain the root cause, and propose a fix:\n\n```\n")
+                    append(snippet)
+                    append("\n```")
+                }
+            )
+        }
+        showSnackbar("Last-run crash detected — prompt prefilled")
     }
     
     override fun onResume() {
@@ -100,6 +121,7 @@ class ChatFragment(
         promptInput = view.findViewById(R.id.anyText)
         executeBtn = view.findViewById(R.id.executeBtn)
         clearBtn = view.findViewById(R.id.clearBtn)
+        exportBtn = view.findViewById(R.id.exportBtn)
         statusText = view.findViewById(R.id.statusText)
         summaryText = view.findViewById(R.id.summaryText)
         progressIndicator = view.findViewById(R.id.progressIndicator)
@@ -170,6 +192,75 @@ class ChatFragment(
     
         clearBtn.setOnClickListener {
             clearConversation()
+        }
+
+        exportBtn.setOnClickListener {
+            exportConversation()
+        }
+
+        wireTemplates()
+    }
+
+    private fun wireTemplates() {
+        val view = requireView()
+        view.findViewById<MaterialButton>(R.id.tplCalculator)?.setOnClickListener {
+            applyTemplate(
+                "Build a complete Calculator app for Android in Kotlin with Material 3. " +
+                    "Include +, -, *, /, decimals, percent, sign toggle, clear, and a result " +
+                    "display. Use a single Activity with a constraint or grid layout. Wire all " +
+                    "buttons in onCreate. Create or modify the necessary files."
+            )
+        }
+        view.findViewById<MaterialButton>(R.id.tplTodo)?.setOnClickListener {
+            applyTemplate(
+                "Build a complete Todo app for Android in Kotlin with Material 3 and Room. " +
+                    "Include adding, editing, deleting and marking tasks complete. Persist to " +
+                    "Room. Use a RecyclerView with checkboxes. Create or modify all needed files."
+            )
+        }
+        view.findViewById<MaterialButton>(R.id.tplChat)?.setOnClickListener {
+            applyTemplate(
+                "Build a simple offline Chat UI for Android in Kotlin with Material 3. " +
+                    "Two-bubble RecyclerView (user/assistant), input field, send button, and " +
+                    "scroll-to-bottom on send. Persist messages with Room. Create or modify all " +
+                    "needed files."
+            )
+        }
+        view.findViewById<MaterialButton>(R.id.tplLogin)?.setOnClickListener {
+            applyTemplate(
+                "Build a Login screen for Android in Kotlin with Material 3 — email + password " +
+                    "fields with validation, show/hide password toggle, primary Sign In button, " +
+                    "and a 'Forgot password?' link. Use TextInputLayout. Create or modify all " +
+                    "needed files."
+            )
+        }
+    }
+
+    private fun applyTemplate(text: String) {
+        promptInput.setText(text)
+        promptInput.setSelection(text.length)
+    }
+
+    private fun exportConversation() {
+        try {
+            if (com.tom.rv2ide.artificial.usage.SessionLog.isEmpty()) {
+                showSnackbar("Nothing to export yet")
+                return
+            }
+            val md = com.tom.rv2ide.artificial.usage.SessionLog.toMarkdown()
+            val json = com.tom.rv2ide.artificial.usage.SessionLog.toJson()
+            val outDir = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS
+            ), "AndroidCodeStudio").apply { mkdirs() }
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                .format(java.util.Date())
+            val mdFile = java.io.File(outDir, "ai-chat-$stamp.md")
+            val jsonFile = java.io.File(outDir, "ai-chat-$stamp.json")
+            mdFile.writeText(md)
+            jsonFile.writeText(json)
+            showSnackbar("Exported to Downloads/AndroidCodeStudio")
+        } catch (e: Throwable) {
+            showSnackbar("Export failed: ${e.message}")
         }
     }
     
@@ -399,7 +490,8 @@ class ChatFragment(
                 typingJob?.cancel()
                 codeCompletionManager.clearSuggestion()
                 aiAgent.clearConversation()
-                
+                com.tom.rv2ide.artificial.usage.SessionLog.clear()
+
                 promptInput.text?.clear()
                 statusText.text = "Conversation cleared. Ready for new request."
                 fileModificationList.visibility = View.GONE

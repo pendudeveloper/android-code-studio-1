@@ -30,6 +30,7 @@ import com.tom.rv2ide.artificial.file.FileWriteResult
 import com.tom.rv2ide.artificial.project.awareness.ProjectTreeResult
 import com.tom.rv2ide.artificial.rules.WritingRules
 import com.tom.rv2ide.artificial.secrets.ApiKey
+import com.tom.rv2ide.artificial.usage.UsageTracker
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -70,6 +71,17 @@ class OpenRouter : AIAgent {
     private const val DEFAULT_MODEL = "openai/gpt-4o-mini"
     private const val HTTP_REFERER = "https://github.com/AndroidCSOfficial/android-code-studio"
     private const val X_TITLE = "Android Code Studio"
+
+    /**
+     * Tried in order whenever the primary model returns a transient/server error
+     * or rate limit. Mostly free models so a fallback never costs the user money.
+     */
+    private val FALLBACK_MODELS = listOf(
+      "deepseek/deepseek-chat:free",
+      "google/gemini-2.0-flash-exp:free",
+      "meta-llama/llama-3.1-70b-instruct:free",
+      "mistralai/mistral-7b-instruct:free",
+    )
 
     fun registerAgent() {
       AIAgentRegistry.register(
@@ -235,13 +247,43 @@ class OpenRouter : AIAgent {
   }
 
   private fun callApi(apiKey: String, prompt: String): String {
+    val attempts = buildList {
+      add(selectedModel)
+      // Add automatic fallbacks for retryable failures. We only fall back on
+      // transient/upstream errors, never on auth/quota errors. The fallbacks
+      // are widely-available models that any OpenRouter account can hit.
+      addAll(FALLBACK_MODELS)
+    }.distinct()
+
+    var lastError: Throwable? = null
+    for ((index, model) in attempts.withIndex()) {
+      try {
+        return callOnce(apiKey, prompt, model)
+      } catch (e: InvalidApiKeyException) {
+        throw e // never fall back if the key is bad
+      } catch (e: QuotaExceededException) {
+        throw e // user must add credits — switching model won't help
+      } catch (e: RateLimitException) {
+        lastError = e
+        android.util.Log.w("OpenRouter", "Rate limited on $model, falling back…", e)
+      } catch (e: Throwable) {
+        lastError = e
+        android.util.Log.w(
+          "OpenRouter",
+          "Transient failure on $model (attempt ${index + 1}/${attempts.size}): ${e.message}",
+        )
+      }
+    }
+    throw lastError ?: Exception("OpenRouter exhausted all fallback models")
+  }
+
+  private fun callOnce(apiKey: String, prompt: String, model: String): String {
     val url = URL(ENDPOINT)
     val connection = url.openConnection() as HttpURLConnection
     try {
       connection.requestMethod = "POST"
       connection.setRequestProperty("Content-Type", "application/json")
       connection.setRequestProperty("Authorization", "Bearer $apiKey")
-      // OpenRouter recommends these headers so requests show up correctly in the dashboard.
       connection.setRequestProperty("HTTP-Referer", HTTP_REFERER)
       connection.setRequestProperty("X-Title", X_TITLE)
       connection.doOutput = true
@@ -253,7 +295,7 @@ class OpenRouter : AIAgent {
       messages.put(JSONObject().put("role", "user").put("content", prompt))
 
       val requestBody = JSONObject()
-        .put("model", selectedModel)
+        .put("model", model)
         .put("messages", messages)
         .put("temperature", 0.7)
         .put("max_tokens", 4096)
@@ -277,7 +319,18 @@ class OpenRouter : AIAgent {
       }
 
       val responseBody = connection.inputStream.bufferedReader().readText()
-      val choices = JSONObject(responseBody).getJSONArray("choices")
+      val json = JSONObject(responseBody)
+
+      // Record token usage when the upstream surfaces it.
+      json.optJSONObject("usage")?.let { usage ->
+        UsageTracker.record(
+          promptTokens = usage.optInt("prompt_tokens", 0),
+          completionTokens = usage.optInt("completion_tokens", 0),
+          model = model,
+        )
+      }
+
+      val choices = json.getJSONArray("choices")
       if (choices.length() > 0) {
         return choices.getJSONObject(0).getJSONObject("message").getString("content")
       }
