@@ -104,27 +104,42 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="end">
+                android:gravity="center_vertical">
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/exportBtn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
-                    android:text="Export"
+                    android:layout_marginEnd="6dp"
+                    android:contentDescription="Export"
+                    android:minWidth="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
                     app:icon="@android:drawable/ic_menu_save"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
                     app:cornerRadius="20dp"
-                    style="@style/Widget.Material3.Button.OutlinedButton" />
+                    style="@style/Widget.Material3.Button.IconButton" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/clearBtn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
-                    android:text="Clear"
+                    android:layout_marginEnd="6dp"
+                    android:contentDescription="Clear"
+                    android:minWidth="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
                     app:icon="@drawable/ic_clear"
+                    app:iconGravity="textStart"
+                    app:iconPadding="0dp"
                     app:cornerRadius="20dp"
-                    style="@style/Widget.Material3.Button.OutlinedButton" />
+                    style="@style/Widget.Material3.Button.IconButton" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/executeBtn"
