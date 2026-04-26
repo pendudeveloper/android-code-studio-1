@@ -1,86 +1,238 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:fadeScrollbars="false"
+    android:scrollbars="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="12dp">
+        android:orientation="vertical"
+        android:padding="16dp">
 
-        <com.google.android.material.progressindicator.CircularProgressIndicator
-            android:id="@+id/aiFixSpinner"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
-            android:indeterminate="true"
-            android:layout_marginEnd="10dp"
-            app:indicatorSize="22dp"
-            style="@style/Widget.Material3.CircularProgressIndicator" />
+        <!-- Header card: spinner + status + attempt counter -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp"
+            app:cardBackgroundColor="?attr/colorSurfaceVariant">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <com.google.android.material.progressindicator.CircularProgressIndicator
+                        android:id="@+id/aiFixSpinner"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:indeterminate="true"
+                        android:layout_marginEnd="10dp"
+                        app:indicatorSize="22dp"
+                        style="@style/Widget.Material3.CircularProgressIndicator" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/aiFixStatus"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Preparing fix…"
+                        android:textAppearance="?attr/textAppearanceTitleMedium"
+                        android:textColor="?attr/colorOnSurface" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/aiFixAttemptChip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="4dp"
+                        android:background="?attr/colorPrimaryContainer"
+                        android:textColor="?attr/colorOnPrimaryContainer"
+                        android:textAppearance="?attr/textAppearanceLabelSmall"
+                        android:visibility="gone"
+                        tools:text="Attempt 1/3"
+                        />
+
+                </LinearLayout>
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/aiFixProgressBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:indeterminate="true"
+                    android:layout_marginTop="10dp"
+                    app:trackCornerRadius="2dp" />
+
+                <com.google.android.material.textview.MaterialTextView
+                    android:id="@+id/aiFixSubStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:visibility="gone"
+                    tools:text="Failed task: :app:compileDebugKotlin"
+                    />
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Build error excerpt -->
+        <com.google.android.material.textview.MaterialTextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Build error"
+            android:textColor="?attr/colorPrimary"
+            android:textAppearance="?attr/textAppearanceTitleSmall"
+            android:layout_marginBottom="6dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            app:cardCornerRadius="10dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant">
+
+            <com.google.android.material.textview.MaterialTextView
+                android:id="@+id/aiFixErrorExcerpt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:fontFamily="monospace"
+                android:textIsSelectable="true"
+                android:textSize="11sp"
+                android:textColor="?attr/colorError"
+                android:maxLines="6"
+                android:scrollHorizontally="false"
+                tools:text="e: SomeFile.kt:42 Unresolved reference foo"
+                />
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Files modified -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="6dp">
+
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Files being modified"
+                android:textColor="?attr/colorPrimary"
+                android:textAppearance="?attr/textAppearanceTitleSmall" />
+
+            <com.google.android.material.textview.MaterialTextView
+                android:id="@+id/aiFixFileCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="?attr/textAppearanceLabelSmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:visibility="gone"
+                tools:text="3 files"
+                />
+
+        </LinearLayout>
 
         <com.google.android.material.textview.MaterialTextView
-            android:id="@+id/aiFixStatus"
-            android:layout_width="0dp"
+            android:id="@+id/aiFixEmptyFiles"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Sending build error to AI…"
+            android:text="No files yet — waiting for AI to propose changes…"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:layout_marginBottom="10dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/aiFixFileList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:nestedScrollingEnabled="false"
+            android:layout_marginBottom="12dp" />
+
+        <!-- AI reply (live streaming) -->
+        <com.google.android.material.textview.MaterialTextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="AI reply"
+            android:textColor="?attr/colorPrimary"
             android:textAppearance="?attr/textAppearanceTitleSmall"
-            android:textColor="?attr/colorOnSurface" />
+            android:layout_marginBottom="6dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            app:cardCornerRadius="10dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant">
+
+            <com.google.android.material.textview.MaterialTextView
+                android:id="@+id/aiFixReply"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:textIsSelectable="true"
+                android:textSize="13sp"
+                android:textColor="?attr/colorOnSurface"
+                android:text="Waiting for AI…"
+                android:minHeight="60dp" />
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Activity log -->
+        <com.google.android.material.textview.MaterialTextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Activity log"
+            android:textColor="?attr/colorPrimary"
+            android:textAppearance="?attr/textAppearanceTitleSmall"
+            android:layout_marginBottom="6dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            app:cardCornerRadius="10dp"
+            app:cardElevation="0dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant">
+
+            <com.google.android.material.textview.MaterialTextView
+                android:id="@+id/aiFixLog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="10dp"
+                android:fontFamily="monospace"
+                android:textIsSelectable="true"
+                android:textSize="11sp"
+                android:textColor="?attr/colorOnSurfaceVariant" />
+
+        </com.google.android.material.card.MaterialCardView>
 
     </LinearLayout>
 
-    <com.google.android.material.progressindicator.LinearProgressIndicator
-        android:id="@+id/aiFixProgressBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:indeterminate="true"
-        android:layout_marginBottom="12dp"
-        app:trackCornerRadius="2dp" />
-
-    <com.google.android.material.textview.MaterialTextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Files being modified"
-        android:textColor="?attr/colorPrimary"
-        android:textAppearance="?attr/textAppearanceTitleSmall"
-        android:layout_marginBottom="6dp" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/aiFixFileList"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxHeight="220dp"
-        android:nestedScrollingEnabled="true"
-        android:layout_marginBottom="12dp" />
-
-    <com.google.android.material.textview.MaterialTextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="AI activity"
-        android:textColor="?attr/colorPrimary"
-        android:textAppearance="?attr/textAppearanceTitleSmall"
-        android:layout_marginBottom="6dp" />
-
-    <androidx.core.widget.NestedScrollView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxHeight="180dp"
-        android:fadeScrollbars="false"
-        android:scrollbars="vertical">
-
-        <com.google.android.material.textview.MaterialTextView
-            android:id="@+id/aiFixLog"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textIsSelectable="true"
-            android:textSize="12sp"
-            android:textColor="?attr/colorOnSurfaceVariant" />
-
-    </androidx.core.widget.NestedScrollView>
-
-</LinearLayout>
+</androidx.core.widget.NestedScrollView>

@@ -186,9 +186,13 @@ object BuildErrorAutoFixer {
     val prompt = context.getString(R.string.ai_agent_autofix_prompt, truncate(output, 12_000))
 
     val live = AIFixLiveProgress(context)
-    val title = "AI fixing build error" +
-        if (cyclesUsed > 1) " (attempt $cyclesUsed/$MAX_AUTO_CYCLES)" else ""
-    live.show(title)
+    live.show(
+      title = "AI fixing build error",
+      errorOutput = output,
+      failedTask = lastTasks.firstOrNull(),
+      attempt = cyclesUsed,
+      maxAttempts = MAX_AUTO_CYCLES,
+    )
 
     val callback = live.callback { success, applied, _ ->
       if (!success) return@callback
