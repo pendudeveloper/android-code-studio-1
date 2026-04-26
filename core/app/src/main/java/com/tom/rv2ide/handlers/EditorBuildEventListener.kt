@@ -26,6 +26,7 @@ import android.content.Context
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.tom.rv2ide.R
 import com.tom.rv2ide.activities.editor.EditorHandlerActivity
+import com.tom.rv2ide.artificial.build.BuildErrorAutoFixer
 import com.tom.rv2ide.preferences.internal.GeneralPreferences
 import com.tom.rv2ide.projects.IProjectManager
 import com.tom.rv2ide.resources.R.string
@@ -92,6 +93,8 @@ class EditorBuildEventListener : GradleBuildService.EventListener {
 
     activity.editorViewModel.isBuildInProgress = true
     activity.content.bottomSheet.clearBuildOutput()
+    // Forget any output captured for an earlier build attempt.
+    BuildErrorAutoFixer.reset()
 
     if (buildInfo.tasks.isNotEmpty()) {
       activity.content.bottomSheet.appendBuildOut(
@@ -128,14 +131,26 @@ class EditorBuildEventListener : GradleBuildService.EventListener {
     activity.editorViewModel.isBuildInProgress = false
 
     activity.flashError(R.string.build_status_failed)
+
+    // Offer to fix the failure with the AI Agent. The fixer is a no-op when the
+    // user has disabled auto-fix or has no API keys configured.
+    try {
+      val projectPath = IProjectManager.getInstance().projectDirPath
+      BuildErrorAutoFixer.onBuildFailed(activity, projectPath)
+    } catch (e: Exception) {
+      log.warn("AI auto-fix could not be triggered", e)
+    }
   }
 
   override fun onOutput(line: String?) {
     checkActivity("onOutput") ?: return
 
-    line?.let { activity.appendBuildOutput(it) }
+    line?.let {
+      activity.appendBuildOutput(it)
+      BuildErrorAutoFixer.appendOutput(it)
+    }
     // TODO This can be handled better when ProgressEvents are received from Tooling API server
-    if (line!!.contains("BUILD SUCCESSFUL") || line.contains("BUILD FAILED")) {
+    if (line != null && (line.contains("BUILD SUCCESSFUL") || line.contains("BUILD FAILED"))) {
       activity.setStatus(line)
     }
   }

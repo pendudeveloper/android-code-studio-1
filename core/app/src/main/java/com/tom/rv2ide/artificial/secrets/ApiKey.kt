@@ -78,6 +78,25 @@ object ApiKey {
         val key = getGrokApiKey()
         return key.isNotBlank() && key.length > 20
     }
+
+    // OpenRouter API Key (unified gateway for many models)
+    fun getOpenRouterApiKey(): String {
+        return prefManager.getString("ai_agent_openrouter_api_key", "")
+    }
+
+    fun hasOpenRouterKey(): Boolean {
+        val key = getOpenRouterApiKey()
+        // OpenRouter keys are typically prefixed with `sk-or-v1-` and are long.
+        return key.isNotBlank() && key.length > 20
+    }
+
+    fun getOpenRouterCustomModel(): String {
+        return prefManager.getString("ai_agent_openrouter_custom_model", "")
+    }
+
+    fun setOpenRouterCustomModel(model: String) {
+        prefManager.putString("ai_agent_openrouter_custom_model", model)
+    }
     
     // Legacy methods for backward compatibility
     @Deprecated("Use getGeminiApiKey() instead", ReplaceWith("getGeminiApiKey()"))
@@ -93,6 +112,7 @@ object ApiKey {
         if (hasDeepseekKey()) providers.add("Deepseek")
         if (hasAnthropicKey()) providers.add("Anthropic")
         if (hasGrokKey()) providers.add("Grok")
+        if (hasOpenRouterKey()) providers.add("OpenRouter")
         return providers
     }
     
@@ -103,13 +123,14 @@ object ApiKey {
             "openai" to getOpenAIApiKey(),
             "deepseek" to getDeepseekApiKey(),
             "anthropic" to getAnthropicApiKey(),
-            "grok" to getGrokApiKey()
+            "grok" to getGrokApiKey(),
+            "openrouter" to getOpenRouterApiKey()
         ).filterValues { it.isNotBlank() }
     }
     
     // Check if any API key is configured
     fun hasAnyApiKey(): Boolean {
         return hasGeminiKey() || hasOpenAIKey() || hasDeepseekKey() || 
-               hasAnthropicKey() || hasGrokKey()
+               hasAnthropicKey() || hasGrokKey() || hasOpenRouterKey()
     }
 }

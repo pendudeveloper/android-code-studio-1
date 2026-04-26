@@ -143,9 +143,37 @@ class Agents(ctx: Context) {
   private val localllm_models = arrayOf(
     "local-model"
   )
-  
-  val ai_agents = openai_models + claude_models + gemini_models + deepseek_models + grok_models + localllm_models
-  
+
+  // Popular OpenRouter model ids. OpenRouter actually supports many more; users can
+  // override the model via the "OpenRouter Custom Model" preference for anything not
+  // listed here.
+  private val openrouter_models = arrayOf(
+    // Free / low-cost picks first
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "meta-llama/llama-3.1-70b-instruct:free",
+    "google/gemini-2.0-flash-exp:free",
+    "deepseek/deepseek-chat:free",
+    "qwen/qwen-2.5-coder-32b-instruct:free",
+    // Paid flagship models
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "openai/o1-mini",
+    "openai/o3-mini",
+    "anthropic/claude-3.5-sonnet",
+    "anthropic/claude-3.5-haiku",
+    "anthropic/claude-3-opus",
+    "google/gemini-2.5-pro",
+    "google/gemini-2.5-flash",
+    "deepseek/deepseek-chat",
+    "deepseek/deepseek-coder",
+    "x-ai/grok-2",
+    "qwen/qwen-2.5-coder-32b-instruct",
+    "meta-llama/llama-3.1-70b-instruct",
+    "mistralai/mistral-large"
+  )
+
+  val ai_agents = openai_models + claude_models + gemini_models + deepseek_models + grok_models + localllm_models + openrouter_models
+
   fun getModelsForProvider(providerId: String): Array<String> {
     return when(providerId) {
       "openai" -> openai_models
@@ -154,10 +182,11 @@ class Agents(ctx: Context) {
       "deepseek" -> deepseek_models
       "grok" -> grok_models
       "localllm" -> localllm_models
+      "openrouter" -> openrouter_models
       else -> gemini_models
     }
   }
-  
+
   fun getProviderForModel(modelName: String): String? {
     return when {
       modelName in openai_models -> "openai"
@@ -166,34 +195,45 @@ class Agents(ctx: Context) {
       modelName in deepseek_models -> "deepseek"
       modelName in grok_models -> "grok"
       modelName in localllm_models -> "localllm"
+      modelName in openrouter_models -> "openrouter"
+      // OpenRouter accepts arbitrary `<vendor>/<model>` ids. If we see a slash and
+      // the user previously selected the OpenRouter provider, treat it as OpenRouter.
+      modelName.contains("/") -> "openrouter"
       else -> null
     }
   }
-  
+
   fun setAgent(name: String) {
+      val currentProvider = sp.getString(PROVIDER_KEY, "gemini") ?: "gemini"
       val provider = when {
           name in openai_models -> "openai"
           name in gemini_models -> "gemini"
           name in claude_models -> "claude"
           name in deepseek_models -> "deepseek"
           name in grok_models -> "grok"
-          else -> sp.getString(PROVIDER_KEY, "gemini") ?: "gemini"
+          name in openrouter_models -> "openrouter"
+          // Free-form OpenRouter models look like `vendor/model` and should be
+          // attributed to OpenRouter unless the user is explicitly on a different
+          // provider (in which case we leave the provider untouched).
+          name.contains("/") && currentProvider == "openrouter" -> "openrouter"
+          else -> currentProvider
       }
-      
+
       sp.edit().putString(PROVIDER_KEY, provider).apply()
       sp.edit().putString(AGENT_KEY, name).apply()
   }
-  
+
   fun getAgent(): String {
     val savedModel = sp.getString(AGENT_KEY, null)
     if (savedModel != null) return savedModel
-    
+
     return when (getProvider()) {
       "openai" -> "gpt-4o"
       "gemini" -> "gemini-2.5-pro"
       "claude" -> "claude-sonnet-4-20250514"
       "deepseek" -> "deepseek-chat"
       "grok" -> "grok-beta"
+      "openrouter" -> "openai/gpt-4o-mini"
       else -> "gemini-2.5-pro"
     }
   }
@@ -207,6 +247,10 @@ class Agents(ctx: Context) {
   }
   
   fun isValidModelForProvider(modelName: String, providerId: String): Boolean {
+    // OpenRouter accepts any `<vendor>/<model>` id, not just the curated list.
+    if (providerId == "openrouter") {
+      return modelName in openrouter_models || modelName.contains("/")
+    }
     return modelName in getModelsForProvider(providerId)
   }
 }

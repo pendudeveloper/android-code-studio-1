@@ -75,16 +75,33 @@
 
   <!-- AI Agent OpenAI -->
   <string name="ai_agent_openai_api_key">OpenAI API Key</string>
-  <string name="ai_agent_openai_api_key_summary">Enter your Deepseek API key to use AI features</string>
-  <string name="ai_agent_openai_api_key_dialog_title">Enter Deepseek API Key</string>
+  <string name="ai_agent_openai_api_key_summary">Enter your OpenAI API key to use AI features</string>
+  <string name="ai_agent_openai_api_key_dialog_title">Enter OpenAI API Key</string>
 
   <!-- AI Agent anthropic -->
   <string name="ai_agent_anthropic_api_key">Anthropic API Key</string>
-  <string name="ai_agent_anthropic_api_key_summary">Enter your Deepseek API key to use AI features</string>
-  <string name="ai_agent_anthropic_api_key_dialog_title">Enter Deepseek API Key</string>
+  <string name="ai_agent_anthropic_api_key_summary">Enter your Anthropic Claude API key to use AI features</string>
+  <string name="ai_agent_anthropic_api_key_dialog_title">Enter Anthropic API Key</string>
 
   <!-- AI Agent grok -->
   <string name="ai_agent_grok_api_key">Grok API Key</string>
+  <string name="ai_agent_grok_api_key_summary">Enter your xAI Grok API key to use AI features</string>
+  <string name="ai_agent_grok_api_key_dialog_title">Enter Grok API Key</string>
+
+  <!-- AI Agent OpenRouter (unified gateway for many models) -->
+  <string name="ai_agent_openrouter_api_key">OpenRouter API Key</string>
+  <string name="ai_agent_openrouter_api_key_summary">Enter your OpenRouter API key to access many models with one key</string>
+  <string name="ai_agent_openrouter_api_key_dialog_title">Enter OpenRouter API Key</string>
+  <string name="ai_agent_openrouter_custom_model">OpenRouter Custom Model</string>
+  <string name="ai_agent_openrouter_custom_model_summary">Override the OpenRouter model id (e.g. openai/gpt-4o-mini, anthropic/claude-3.5-sonnet)</string>
+  <string name="ai_agent_openrouter_custom_model_dialog_title">OpenRouter Model ID</string>
+
+  <!-- Build error auto-fix -->
+  <string name="ai_agent_autofix_build">Fix build errors with AI</string>
+  <string name="ai_agent_autofix_build_summary">When a build fails, ask the AI Agent to analyze the output and propose a fix</string>
+  <string name="ai_agent_autofix_prompt">The Gradle build just failed. Analyze the build output below and fix the underlying error in the project files. Only modify the files needed to make the build succeed. Do not invent file paths.\n\n=== BUILD OUTPUT ===\n%1$s</string>
+  <string name="ai_agent_autofix_unavailable">No AI provider is configured. Add an API key in AI Preferences first.</string>
+  <string name="ai_agent_autofix_started">Asking AI to fix build errors\u2026</string>
 
   <string name="no_acs_title">ACS Components Missing</string>
   <string name="no_acs_summary">This application appears to be incomplete or unofficial, as it is missing the required ACS build system. For full functionality, please install the official Android Code Studio from a trusted source.</string>

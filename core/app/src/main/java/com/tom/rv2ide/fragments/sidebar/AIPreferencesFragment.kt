@@ -9,6 +9,7 @@ import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import android.content.SharedPreferences
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputLayout
@@ -40,6 +41,23 @@ class AIPreferencesFragment(
     
     private var completionStateMonitorJob: Job? = null
     private var isCompletionEnabled = true
+
+    /**
+     * Listen for `code_completion_enabled` changes via the system instead of polling every
+     * 100 ms. The polling loop kept a coroutine + a SharedPreferences read alive at all
+     * times this fragment was visible, which wasted both CPU and battery.
+     */
+    private val completionPrefListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+            if (key != "code_completion_enabled") return@OnSharedPreferenceChangeListener
+            val enabled = sp.getBoolean(key, true)
+            if (enabled == isCompletionEnabled) return@OnSharedPreferenceChangeListener
+            isCompletionEnabled = enabled
+            if (codeCompletionToggle.isChecked != enabled) {
+                codeCompletionToggle.isChecked = enabled
+            }
+            lifecycleScope.launch { applyCompletionStateChange(enabled) }
+        }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -89,10 +107,11 @@ class AIPreferencesFragment(
             "claude" to "Anthropic Claude",
             "deepseek" to "DeepSeek",
             "grok" to "xAI Grok",
+            "openrouter" to "OpenRouter (multi-model)",
             "localllm" to "Local LLM"
         )
-        
-        val allProviderIds = listOf("gemini", "openai", "claude", "deepseek", "grok", "localllm")
+
+        val allProviderIds = listOf("gemini", "openai", "claude", "deepseek", "grok", "openrouter", "localllm")
         val providerNames = allProviderIds.map { providerMap[it] ?: it }
         
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, providerNames)
@@ -126,6 +145,7 @@ class AIPreferencesFragment(
             "claude" to "Anthropic Claude",
             "deepseek" to "DeepSeek",
             "grok" to "xAI Grok",
+            "openrouter" to "OpenRouter (multi-model)",
             "localllm" to "Local LLM"
         )
         
@@ -146,6 +166,7 @@ class AIPreferencesFragment(
             "claude" -> "Anthropic Claude"
             "deepseek" -> "DeepSeek"
             "grok" -> "xAI Grok"
+            "openrouter" -> "OpenRouter (multi-model)"
             "localllm" -> "Local LLM"
             else -> currentProvider.uppercase()
         }
@@ -225,31 +246,21 @@ class AIPreferencesFragment(
     
     private fun startCompletionStateMonitoring() {
         stopCompletionStateMonitoring()
-        
-        completionStateMonitorJob = lifecycleScope.launch {
-            while (true) {
-                delay(100)
-                
-                val savedState = requireContext().getSharedPreferences("ai_preferences", Context.MODE_PRIVATE)
-                    .getBoolean("code_completion_enabled", true)
-                
-                if (savedState != isCompletionEnabled) {
-                    android.util.Log.d("AIPreferences", "State mismatch detected: saved=$savedState, current=$isCompletionEnabled")
-                    isCompletionEnabled = savedState
-                    
-                    if (codeCompletionToggle.isChecked != savedState) {
-                        codeCompletionToggle.isChecked = savedState
-                    }
-                    
-                    applyCompletionStateChange(savedState)
-                }
-            }
-        }
+        requireContext()
+            .getSharedPreferences("ai_preferences", Context.MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(completionPrefListener)
     }
-    
+
     private fun stopCompletionStateMonitoring() {
         completionStateMonitorJob?.cancel()
         completionStateMonitorJob = null
+        // Best-effort: context may already be detached during teardown.
+        try {
+            context?.getSharedPreferences("ai_preferences", Context.MODE_PRIVATE)
+                ?.unregisterOnSharedPreferenceChangeListener(completionPrefListener)
+        } catch (_: IllegalStateException) {
+            // Fragment already detached.
+        }
     }
     
     private suspend fun applyCompletionStateChange(enabled: Boolean) {
