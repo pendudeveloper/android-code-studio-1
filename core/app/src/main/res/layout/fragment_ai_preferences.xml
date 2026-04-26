@@ -43,7 +43,9 @@
                 android:id="@+id/modelDropdown"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="none"
+                android:inputType="textNoSuggestions"
+                android:imeOptions="actionDone"
+                android:completionThreshold="1"
                 android:textAppearance="?attr/textAppearanceBodyLarge" />
 
         </com.google.android.material.textfield.TextInputLayout>

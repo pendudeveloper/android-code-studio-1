@@ -314,30 +314,74 @@ class AIPreferencesFragment(
 
     private fun setupModelDropdown() {
         updateModelDropdown()
-        
+
         modelDropdown.setOnItemClickListener { _, _, position, _ ->
-            val currentProvider = agents.getProvider()
-            val models = agents.getModelsForProvider(currentProvider)
-            
-            if (position < models.size) {
-                val selectedModel = models[position]
-                handleModelChange(selectedModel)
+            val displayModels = buildDisplayModels(agents.getProvider())
+            if (position in displayModels.indices) {
+                handleModelChange(displayModels[position])
+            }
+        }
+
+        modelDropdown.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                commitTypedModel()
+            }
+        }
+
+        modelDropdown.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                commitTypedModel()
+                modelDropdown.clearFocus()
+                true
+            } else {
+                false
             }
         }
     }
 
+    private fun commitTypedModel() {
+        val typed = modelDropdown.text?.toString()?.trim().orEmpty()
+        if (typed.isBlank() || typed == agents.getAgent()) return
+        val provider = agents.getProvider()
+        // Persist the typed id into the provider-specific custom slot too,
+        // so reopening the screen restores the user's choice.
+        when (provider) {
+            "openrouter" -> ApiKey.setOpenRouterCustomModel(typed)
+            "openaicompat" -> ApiKey.setOpenAICompatModel(typed)
+        }
+        handleModelChange(typed)
+        updateModelDropdown()
+        showSnackbar("Saved model: $typed")
+    }
+
+    private fun buildDisplayModels(providerId: String): List<String> {
+        val base = agents.getModelsForProvider(providerId).toMutableList()
+        val saved = agents.getAgent()
+        // For openrouter, also surface the saved custom model so users can see/pick
+        // their typed model id even if it isn't part of the curated list.
+        if (providerId == "openrouter") {
+            val custom = ApiKey.getOpenRouterCustomModel().trim()
+            if (custom.isNotBlank() && custom !in base) base.add(0, custom)
+        }
+        if (providerId == "openaicompat") {
+            val custom = ApiKey.getOpenAICompatModel().trim()
+            if (custom.isNotBlank() && custom !in base) base.add(0, custom)
+        }
+        if (saved.isNotBlank() && saved !in base) base.add(0, saved)
+        return base
+    }
+
     private fun updateModelDropdown() {
         val currentProvider = agents.getProvider()
-        val models = agents.getModelsForProvider(currentProvider)
-        
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, models.toList())
+        val displayModels = buildDisplayModels(currentProvider)
+
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, displayModels)
         modelDropdown.setAdapter(adapter)
-        
+
         val currentModel = agents.getAgent()
-        if (currentModel in models) {
-            modelDropdown.setText(currentModel, false)
-        } else if (models.isNotEmpty()) {
-            modelDropdown.setText(models[0], false)
+        when {
+            currentModel.isNotBlank() -> modelDropdown.setText(currentModel, false)
+            displayModels.isNotEmpty() -> modelDropdown.setText(displayModels[0], false)
         }
     }
 
