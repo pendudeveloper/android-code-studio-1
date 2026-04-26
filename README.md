@@ -2,38 +2,137 @@
   <img src="https://avatars.githubusercontent.com/u/234419170?s=400&u=43571ebf481969baafb8399813ad57f46c19eb95&v=4" alt="AndroidIDE" width="80" height="80"/>
 </p>
 
-<h2 align="left"><b>Android Code Studio</b></h2>
+<h2 align="left"><b>Android Code Studio (piashmsu fork)</b></h2>
 <p align="left">
-  An IDE to develop real, Gradle-based Android applications on Android devices.
+  An IDE to develop real, Gradle-based Android applications on Android devices — with a powerful, multi-provider AI coding agent.
 <p><br>
 
 <p align="left">
-<!-- Latest release -->
-<img src="https://img.shields.io/github/v/release/AndroidCSOfficial/android-code-studio?include_prereleases&amp;label=latest%20release" alt="Latest release">
-<!-- Build and test -->
-<!-- <img src="https://github.com/Mohammed-baqer-null/android-code-studio/actions/workflows/asm_build.yml/badge.svg" alt="Builds and tests"> -->
-<!-- Crowdin -->
-<a href="https://crowdin.com/project/androidide"><img src="https://badges.crowdin.net/androidide/localized.svg" alt="Crowdin"></a>
-<!-- License -->
-<img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License"></p>
-
-
-<p align="left">
-  <a href="https://github.com/Mohammed-baqer-null/android-code-studio/issues/new?labels=bug&template=BUG.yml&title=%5BBug%5D%3A+">
-    <img src="https://img.shields.io/badge/Report%20Bug-red?style=for-the-badge&logo=github" alt="Report a bug">
-  </a>
-  <a href="https://github.com/Mohammed-baqer-null/android-code-studio/issues/new?labels=feature&template=FEATURE.yml&title=%5BFeature%5D%3A+">
-    <img src="https://img.shields.io/badge/Request%20Feature-brightgreen?style=for-the-badge&logo=github" alt="Request a feature">
-  </a>
-  <a href="https://t.me/rv2ide">
-    <img src="https://img.shields.io/badge/Telegram-Join%20Us-1DA1F2?style=for-the-badge&logo=telegram" alt="Join on Telegram">
-  </a>
-    <a href="https://docs.androidide.com/">
-    <img src="https://img.shields.io/badge/Docs-Explore-blue?style=for-the-badge&logo=read-the-docs" alt="Explore the docs">
-  </a>
+<img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License">
+<img src="https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white" alt="Android">
+<img src="https://img.shields.io/badge/AI%20Providers-7%2B-blueviolet" alt="AI Providers">
 </p>
 
-## Features
+> This is the **piashmsu** fork of [AndroidCodeStudio](https://github.com/AndroidCSOfficial/android-code-studio) with a heavily extended AI agent, build-error auto-fix, streaming responses, diff preview, editor AI actions, and many fixes / optimizations.
+> Active branch: [`devin/1777186665-ai-agent-openrouter-autofix`](https://github.com/piashmsu/android-code-studio/tree/devin/1777186665-ai-agent-openrouter-autofix) — open PR: [#1](https://github.com/piashmsu/android-code-studio/pull/1)
+
+---
+
+## What's new in this fork
+
+### AI providers — what you can plug in
+
+| Provider | Status | Notes |
+|---|---|---|
+| **OpenRouter** | New | 21+ curated free + paid models, custom `vendor/model` slug supported, fallback chain |
+| **OpenAI-compatible (custom URL)** | New | Manually configure Base URL + API key + Model id. Works with Together, Groq, DeepInfra, Fireworks, Ollama (`http://10.0.2.2:11434/v1`), self-hosted vLLM, anything that speaks `/v1/chat/completions` |
+| OpenAI | Existing | Bug-fixed (was sharing DeepSeek strings) |
+| Anthropic Claude | Existing | Bug-fixed |
+| Google Gemini | Existing | — |
+| DeepSeek | Existing | — |
+| xAI Grok | Existing | Bug-fixed |
+| Local LLM | Existing | Improved integration |
+
+### AI agent capability matrix
+
+| Capability | Status |
+|---|---|
+| Token-by-token streaming response (SSE) | New |
+| Build-error auto-fix dialog | New |
+| Live progress dialog with streamed AI reply, file list, activity log, error excerpt | New |
+| Auto-rebuild after AI fix (max 3 cycles) | New |
+| Diff preview before applying file changes (line-level, optional) | New |
+| Editor selection actions: Explain / Refactor / Add docs / Generate test | New |
+| Project memory (`.aistudio/memory.md`) | New |
+| Quick-start templates: Calculator, Todo, Chat, Login | New |
+| Markdown rendering for AI replies (code blocks, bold, lists, headings) | New |
+| Token counter (per request + session total) | New |
+| Conversation export (markdown + JSON) | New |
+| OpenRouter fallback chain (free → free → free) | New |
+| Crash → AI auto-prefill on next launch | New |
+| Image input (vision models) | Planned |
+| Inline ghost text (Copilot-style) | Planned |
+| Multi-file smart context picker | Planned |
+| Tool calling / function calling | Planned |
+
+---
+
+## AI Fix — live build-error workflow
+
+When a Gradle build fails:
+
+1. The IDE captures full Gradle output, the failing task name, and the error tail.
+2. A confirmation dialog asks if you want the AI to fix it.
+3. Tapping **Fix** opens a live progress dialog (85% screen height, scrollable):
+   - **Header card** — spinner, status text, attempt chip (e.g. `Attempt 2/3`)
+   - **Build error excerpt** — extracts Kotlin `e: ...` and `error: ...` lines first, filters Gradle deprecation/help noise, deduped, max 12 lines
+   - **Files being modified** — RecyclerView with success/fail icons, count badge
+   - **AI reply card** — markdown-rendered streaming text (80 ms throttling, smooth)
+   - **Activity log** — color-coded (info / file / success / warn / error) with timestamps
+4. After AI replies, files are written to disk via `AIFileWriter` (with timestamped backup in `app's filesDir/ai_backups/`).
+5. If `Auto-rebuild after AI fix` is enabled, the build is re-run automatically (up to 3 cycles).
+6. **Cancel button** aborts a running request. **30-second watchdog** logs an actionable warning if no progress arrives (likely invalid API key, dead model, or unreachable provider).
+7. **Provider/model badge** is shown on the dialog so you always know which upstream is being hit.
+
+---
+
+## Settings → AI
+
+- **Provider dropdown** — pick from 7+ providers
+- **Model / Agent box** — fully editable; type any model id (e.g. `deepseek/deepseek-chat-v3.1:free`), tap Done, it persists
+- **API key dialogs** — per provider
+- **OpenAI-compatible group** — Base URL + API key + Model id, with `Save endpoint` button and URL normalization (`/v1`, `/v1/chat/completions`, or just domain — all work)
+- **Custom OpenRouter model** — saved name appears in the main Model/Agent box and survives app restart
+- **Streaming responses** toggle (default ON)
+- **Diff preview before applying** toggle (default OFF)
+- **Auto-rebuild after AI fix** toggle (default OFF)
+- **Auto-switch on quota/rate-limit** toggle
+- **Code completion** toggle
+
+---
+
+## Build-speed tuning
+
+`gradle.properties` is auto-tuned for new projects via the included project template + `GradlePropertiesPresets`:
+
+- Gradle daemon **ON**
+- Parallel builds **ON**
+- Build cache **ON**
+- Configuration cache **ON**
+- JVM heap **4 GB** + `UseParallelGC`
+- Kotlin incremental compile **ON**
+- AAPT2 daemon + parallel resource processing
+
+**Expected impact:** clean build 4–5 min → 1–2 min, incremental rebuild 30–60 s → 5–15 s.
+
+---
+
+## RAM / performance fixes
+
+- Conversation history capped at **20 messages** for every provider
+- File-context loading capped at **40 files × 64 KB** to avoid OOM on large projects
+- Replaced 100 ms `SharedPreferences` polling loop with `OnSharedPreferenceChangeListener` (battery + CPU savings)
+- Live progress dialog uses 80 ms coalesced UI updates for streaming (no UI jank)
+
+---
+
+## Bug fixes (compared to upstream)
+
+- OpenAI / Anthropic / Grok strings were copy-pasted from DeepSeek (every label said "Deepseek"). Fixed.
+- 51 duplicate string IDs in Arabic `strings.xml`. Fixed.
+- Duplicate `title_build_variants` resource. Fixed.
+- Format string mismatches in Arabic + Chinese translations. Fixed (positional format).
+- AAPT2 errors during release build. Fixed.
+- `jdk-compiler` module had references to missing OpenJDK source files (`ServerMain`, `SjavacServer`, etc). Excluded from build.
+- `ClangLanguageServer` stub added (file was gitignored upstream).
+- OpenRouter custom model field couldn't be typed into (`inputType="none"`). Now editable.
+- Custom OpenRouter model name didn't persist visually in the main Model/Agent box. Fixed — typed name is added to the dropdown list, persists across app restarts, and is restored from preferences.
+- Chat tab Send button was off-screen on narrow phones (Export + Clear were eating row width). Fixed — Export and Clear are now icon-only, Send is anchored full-width.
+- Various AI agent message-routing bugs around streaming and modification callbacks.
+
+---
+
+## Original feature list
 
 - [x] Gradle support
 - [x] JDK 11 & JDK 17 available
@@ -57,33 +156,48 @@
 - [x] Asset Studio (Drawable & Icon Maker)
 - [x] Plugin Creator (Create sub-modules or plugins inside your project)
 - [x] Git integration
-- [x] **AI Agent** – fully **project-aware AI assistant** that understands your code, modules, and project structure to help with coding.
-<!-- - debugging, and suggestions-->
+- [x] **AI Agent** – fully **project-aware AI assistant** with multi-provider support, streaming, diff preview, build-error auto-fix, editor selection actions, and project memory.
+
+---
 
 ## Installation
 
 [<img src="https://github.com/Kunzisoft/Github-badge/raw/main/get-it-on-github.svg"
-    alt="Get it on F-Droid"
-    height="80">](https://github.com/Mohammed-baqer-null/android-code-studio/releases)
+    alt="Get it on GitHub"
+    height="80">](https://github.com/piashmsu/android-code-studio/releases)
 
-> _Please install Android Code Studio from trusted sources only i.e._
-> - [_GitHub Releases_](https://github.com/Mohammed-baqer-null/android-code-studio/releases)
+> Please install Android Code Studio from trusted sources only:
+> - [piashmsu fork releases](https://github.com/piashmsu/android-code-studio/releases)
+> - [Upstream releases](https://github.com/Mohammed-baqer-null/android-code-studio/releases)
 
-- Download the Android Code Studio APK from the mentioned trusted sources.
-- Follow the
-  instructions [here](https://docs.androidide.com/tutorials/get-started.html) to
-  install the build tools.
+- Download the APK from a trusted source.
+- Follow the [setup guide](https://docs.androidide.com/tutorials/get-started.html) to install build tools.
+
+## Building from source
+
+```bash
+git clone https://github.com/piashmsu/android-code-studio.git
+cd android-code-studio
+git checkout devin/1777186665-ai-agent-openrouter-autofix
+
+# Provide SDK location:
+echo "sdk.dir=/path/to/your/android-sdk" > local.properties
+
+# Debug APK (split per ABI):
+./gradlew :core:app:assembleDebug
+
+# Output:
+ls core/app/build/outputs/apk/debug/
+# android-code-studio-arm64-v8a-debug-*.apk
+# android-code-studio-armeabi-v7a-debug-*.apk
+```
 
 ## Limitations
 
-- For working with projects in AndroidCodeStudio, your project must use Android Gradle Plugin v7.2.0 or
-  newer. Projects with older AGP must be migrated to newer versions.
-- SDK Manager is already included in Android SDK and is accessible in Android Code Studio via its Terminal.
-  But, you cannot use it to install some tools (like NDK) because those tools are not built for
-  Android.
+- Project must use Android Gradle Plugin v7.2.0 or newer.
+- SDK Manager is bundled and accessible from the terminal, but some tools (like NDK) are not built for Android.
 
-The app is still being developed actively. It's in beta stage and may not be stable. if you have any
-issues using the app, please let us know.
+The app is in active development. Please report issues you encounter.
 
 ## Contributing
 
@@ -93,24 +207,20 @@ For translations, visit the [Crowdin project page](https://crowdin.com/project/a
 
 ## Thanks to
 
-- [Rosemoe](https://github.com/Rosemoe) for the
-  awesome [CodeEditor](https://github.com/Rosemoe/sora-editor)
-- [Termux](https://github.com/termux) for [Terminal Emulator](https://github.com/termux/termux-app)
-- [Bogdan Melnychuk](https://github.com/bmelnychuk)
-  for [AndroidTreeView](https://github.com/bmelnychuk/AndroidTreeView)
-- [George Fraser](https://github.com/georgewfraser) for
-  the [Java Language Server](https://github.com/georgewfraser/java-language-server)
-- [FWCD](https://github.com/fwcd) for
-  the [Kotlin Language Server](https://github.com/fwcd/kotlin-language-server)
-- [Itsaky](https://github.com/itsaky) The original developer
-  of [AndroidIDE](https://github.com/AndroidIDEOfficial/AndroidIDE.git) whose project I forked and now maintain.
-  
+- [Rosemoe](https://github.com/Rosemoe) for the awesome [CodeEditor](https://github.com/Rosemoe/sora-editor)
+- [Termux](https://github.com/termux) for the [Terminal Emulator](https://github.com/termux/termux-app)
+- [Bogdan Melnychuk](https://github.com/bmelnychuk) for [AndroidTreeView](https://github.com/bmelnychuk/AndroidTreeView)
+- [George Fraser](https://github.com/georgewfraser) for the [Java Language Server](https://github.com/georgewfraser/java-language-server)
+- [FWCD](https://github.com/fwcd) for the [Kotlin Language Server](https://github.com/fwcd/kotlin-language-server)
+- [Itsaky](https://github.com/itsaky) — original developer of [AndroidIDE](https://github.com/AndroidIDEOfficial/AndroidIDE.git)
+- [Mohammed-baqer-null](https://github.com/Mohammed-baqer-null) — maintainer of the AndroidCodeStudio upstream this fork is based on.
+
 Thanks to all the developers who have contributed to this project.
 
-## Contact Us
+## Contact
 
-- [Website](https://m.androidide.com)
-- [Telegram](https://t.me/rv2ide)
+- Telegram: [t.me/rv2ide](https://t.me/rv2ide)
+- Upstream docs: [m.androidide.com](https://m.androidide.com)
 
 ## License
 
@@ -129,5 +239,4 @@ You should have received a copy of the GNU General Public License
 along with AndroidCodeStudio.  If not, see <https://www.gnu.org/licenses/>.
 ```
 
-Any violations to the license can be reported either by opening an issue or writing a mail to us
-directly.
+Any violations of the license can be reported either by opening an issue or writing a mail to us directly.
