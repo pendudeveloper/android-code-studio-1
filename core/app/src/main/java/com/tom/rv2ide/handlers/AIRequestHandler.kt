@@ -122,6 +122,39 @@ class AIRequestHandler(
                     statusText.text = "🔄 Retry #$attemptNumber: $message"
                 }
             }
+
+            override fun onStreamChunk(delta: String, fullSoFar: String) {
+                // Coalesce updates on the main thread; the SSE callback fires
+                // dozens of times per second, so we just push the latest text
+                // and let the rendering cost stay sublinear.
+                lifecycleScope.launch(Dispatchers.Main) {
+                    summaryCard.visibility = View.VISIBLE
+                    val truncated = if (fullSoFar.length > 8000)
+                        "…" + fullSoFar.takeLast(8000) else fullSoFar
+                    summaryText.text = truncated
+                    statusText.text = "💬 Streaming…"
+                }
+            }
+
+            override suspend fun confirmFileChange(
+                filePath: String,
+                previousContent: String?,
+                newContent: String,
+            ): Boolean {
+                val ctx = statusText.context
+                val sp = android.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                val enabled = sp.getBoolean("ai_agent_diff_preview_enabled", false)
+                if (!enabled) return true
+                return try {
+                    com.tom.rv2ide.artificial.diff.DiffPreviewDialog.confirm(
+                        ctx, filePath, previousContent, newContent,
+                    )
+                } catch (_: Exception) {
+                    // If the dialog can't show (e.g., context not an Activity),
+                    // fall back to writing.
+                    true
+                }
+            }
         })
     }
     

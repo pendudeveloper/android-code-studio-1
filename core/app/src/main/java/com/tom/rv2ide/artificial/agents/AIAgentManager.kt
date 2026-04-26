@@ -51,6 +51,7 @@ class AIAgentManager(private val context: Context) {
         DeepSeek.registerAgent()
         LocalLLM.registerAgent()
         OpenRouter.registerAgent()
+        com.tom.rv2ide.artificial.agents.openaicompat.OpenAICompat.registerAgent()
         
         permissionManager.setFileWriteEnabled(true)
         permissionManager.setRequireConfirmation(false)
@@ -155,12 +156,27 @@ class AIAgentManager(private val context: Context) {
 
                 val previousFileStates = captureCurrentFileStates()
 
-                val result = currentAgent?.generateCode(
-                    prompt = userRequest,
-                    context = null,
-                    language = "kotlin",
-                    projectStructure = null
-                ) ?: Result.failure(Exception("No agent initialized"))
+                val streamingEnabled = run {
+                    val sp = android.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                    sp.getBoolean("ai_agent_streaming_enabled", true)
+                }
+
+                val result = if (streamingEnabled && currentAgent?.supportsStreaming() == true) {
+                    currentAgent?.generateCodeStreaming(
+                        prompt = userRequest,
+                        context = null,
+                        language = "kotlin",
+                        projectStructure = null,
+                        onChunk = { delta, full -> callback.onStreamChunk(delta, full) },
+                    ) ?: Result.failure(Exception("No agent initialized"))
+                } else {
+                    currentAgent?.generateCode(
+                        prompt = userRequest,
+                        context = null,
+                        language = "kotlin",
+                        projectStructure = null
+                    ) ?: Result.failure(Exception("No agent initialized"))
+                }
 
                 result.fold(
                     onSuccess = { response ->
@@ -312,8 +328,15 @@ class AIAgentManager(private val context: Context) {
                         val cleanedContent = parser.cleanFileContent(rawContent)
                         val previousContent = previousFileStates[currentFile]
 
-                        val writeResult = currentAgent?.writeFile(currentFile, cleanedContent)
-                            ?: FileWriteResult.Error("No agent initialized")
+                        val approved = callback.confirmFileChange(
+                            currentFile, previousContent, cleanedContent,
+                        )
+                        val writeResult = if (!approved) {
+                            FileWriteResult.Error("Skipped by user via diff preview")
+                        } else {
+                            currentAgent?.writeFile(currentFile, cleanedContent)
+                                ?: FileWriteResult.Error("No agent initialized")
+                        }
 
                         val success = writeResult is FileWriteResult.Success
                         currentAgent?.recordModification(currentFile, previousContent, cleanedContent, success)
@@ -340,8 +363,15 @@ class AIAgentManager(private val context: Context) {
                 val cleanedContent = parser.cleanFileContent(rawContent)
                 val previousContent = previousFileStates[currentFile]
 
-                val writeResult = currentAgent?.writeFile(currentFile, cleanedContent)
-                    ?: FileWriteResult.Error("No agent initialized")
+                val approved = callback.confirmFileChange(
+                    currentFile, previousContent, cleanedContent,
+                )
+                val writeResult = if (!approved) {
+                    FileWriteResult.Error("Skipped by user via diff preview")
+                } else {
+                    currentAgent?.writeFile(currentFile, cleanedContent)
+                        ?: FileWriteResult.Error("No agent initialized")
+                }
 
                 val success = writeResult is FileWriteResult.Success
                 currentAgent?.recordModification(currentFile, previousContent, cleanedContent, success)
@@ -513,6 +543,25 @@ class AIAgentManager(private val context: Context) {
         fun onTextResponse(response: String, summary: ModificationSummary)
         fun onError(message: String)
         fun onRetry(attemptNumber: Int, message: String)
+        /**
+         * Streaming providers push partial deltas as they arrive. Default
+         * implementation is a no-op so existing callbacks keep working without
+         * changes.
+         */
+        fun onStreamChunk(delta: String, fullSoFar: String) {}
+
+        /**
+         * Optional confirmation hook. The manager calls this before writing
+         * a file when diff-preview mode is on. Returning `false` will skip
+         * the write and mark the modification as failed. Default returns
+         * `true` (no confirmation) for backwards compatibility. This call
+         * is made on the IO dispatcher and may block on user interaction.
+         */
+        suspend fun confirmFileChange(
+            filePath: String,
+            previousContent: String?,
+            newContent: String,
+        ): Boolean = true
     }
 
     data class ModificationResult(

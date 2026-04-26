@@ -183,6 +183,12 @@ class Agents(ctx: Context) {
       "grok" -> grok_models
       "localllm" -> localllm_models
       "openrouter" -> openrouter_models
+      "openaicompat" -> {
+        // The user supplies the model id manually via the OpenAI-compatible
+        // panel, so the dropdown just shows what they have saved (if anything).
+        val saved = sp.getString("ai_agent_openaicompat_model", "") ?: ""
+        if (saved.isBlank()) arrayOf() else arrayOf(saved)
+      }
       else -> gemini_models
     }
   }
@@ -206,6 +212,10 @@ class Agents(ctx: Context) {
   fun setAgent(name: String) {
       val currentProvider = sp.getString(PROVIDER_KEY, "gemini") ?: "gemini"
       val provider = when {
+          // OpenAI-compatible accepts any free-form model id (e.g. `gpt-4o-mini`,
+          // `mistralai/Mixtral-...`, `llama3:8b`). When the user is explicitly on
+          // this provider, never reroute the model to a different one.
+          currentProvider == "openaicompat" -> "openaicompat"
           name in openai_models -> "openai"
           name in gemini_models -> "gemini"
           name in claude_models -> "claude"
@@ -250,6 +260,11 @@ class Agents(ctx: Context) {
     // OpenRouter accepts any `<vendor>/<model>` id, not just the curated list.
     if (providerId == "openrouter") {
       return modelName in openrouter_models || modelName.contains("/")
+    }
+    // OpenAI-compatible accepts any free-form model id since the upstream is
+    // user-configured; nothing to validate against.
+    if (providerId == "openaicompat") {
+      return modelName.isNotBlank()
     }
     return modelName in getModelsForProvider(providerId)
   }

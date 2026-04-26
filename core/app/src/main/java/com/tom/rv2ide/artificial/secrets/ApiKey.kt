@@ -97,6 +97,39 @@ object ApiKey {
     fun setOpenRouterCustomModel(model: String) {
         prefManager.putString("ai_agent_openrouter_custom_model", model)
     }
+
+    // OpenAI-compatible (custom endpoint). Lets the user point the agent at any
+    // service that speaks the OpenAI /v1/chat/completions schema (Ollama, Together,
+    // Groq, DeepInfra, Mistral La Plateforme, self-hosted, ...).
+    fun getOpenAICompatApiKey(): String {
+        return prefManager.getString("ai_agent_openaicompat_api_key", "")
+    }
+
+    fun setOpenAICompatApiKey(key: String) {
+        prefManager.putString("ai_agent_openaicompat_api_key", key)
+    }
+
+    fun hasOpenAICompatKey(): Boolean {
+        // Some local/self-hosted endpoints (Ollama) accept any non-empty key — even
+        // a placeholder. Only require a non-blank value, not minimum length.
+        return getOpenAICompatApiKey().isNotBlank()
+    }
+
+    fun getOpenAICompatBaseUrl(): String {
+        return prefManager.getString("ai_agent_openaicompat_base_url", "")
+    }
+
+    fun setOpenAICompatBaseUrl(url: String) {
+        prefManager.putString("ai_agent_openaicompat_base_url", url)
+    }
+
+    fun getOpenAICompatModel(): String {
+        return prefManager.getString("ai_agent_openaicompat_model", "")
+    }
+
+    fun setOpenAICompatModel(model: String) {
+        prefManager.putString("ai_agent_openaicompat_model", model)
+    }
     
     // Legacy methods for backward compatibility
     @Deprecated("Use getGeminiApiKey() instead", ReplaceWith("getGeminiApiKey()"))
@@ -113,6 +146,7 @@ object ApiKey {
         if (hasAnthropicKey()) providers.add("Anthropic")
         if (hasGrokKey()) providers.add("Grok")
         if (hasOpenRouterKey()) providers.add("OpenRouter")
+        if (hasOpenAICompatKey()) providers.add("OpenAI-compatible")
         return providers
     }
     
@@ -124,13 +158,14 @@ object ApiKey {
             "deepseek" to getDeepseekApiKey(),
             "anthropic" to getAnthropicApiKey(),
             "grok" to getGrokApiKey(),
-            "openrouter" to getOpenRouterApiKey()
+            "openrouter" to getOpenRouterApiKey(),
+            "openaicompat" to getOpenAICompatApiKey()
         ).filterValues { it.isNotBlank() }
     }
     
     // Check if any API key is configured
     fun hasAnyApiKey(): Boolean {
         return hasGeminiKey() || hasOpenAIKey() || hasDeepseekKey() || 
-               hasAnthropicKey() || hasGrokKey() || hasOpenRouterKey()
+               hasAnthropicKey() || hasGrokKey() || hasOpenRouterKey() || hasOpenAICompatKey()
     }
 }

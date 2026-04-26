@@ -87,6 +87,7 @@ class EditorActivityActions {
       registry.registerAction(IdeConfigurationsAction(context, order++))
 
       // editor text actions
+      registry.registerAction(com.tom.rv2ide.actions.editor.AIActionMenu(context, order++))
       registry.registerAction(ExtractAction(context, order++))
       registry.registerAction(ExpandSelectionAction(context, order++))
       registry.registerAction(SelectAllAction(context, order++))

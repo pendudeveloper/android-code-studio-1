@@ -43,6 +43,13 @@ class AIPreferencesFragment(
     private lateinit var openRouterCustomGroup: View
     private lateinit var openRouterCustomEdit: TextInputEditText
     private lateinit var openRouterCustomSave: MaterialButton
+    private lateinit var openAICompatGroup: View
+    private lateinit var openAICompatBaseUrlEdit: TextInputEditText
+    private lateinit var openAICompatApiKeyEdit: TextInputEditText
+    private lateinit var openAICompatModelEdit: TextInputEditText
+    private lateinit var openAICompatSave: MaterialButton
+    private var streamingToggle: MaterialSwitch? = null
+    private var diffPreviewToggle: MaterialSwitch? = null
     
     private val providerSwitchDialog by lazy { ProviderSwitchDialog(requireContext()) }
     
@@ -91,6 +98,7 @@ class AIPreferencesFragment(
         updateProviderDropdownSelection()
         updateModelDropdown()
         refreshOpenRouterCustomModelVisibility()
+        refreshOpenAICompatVisibility()
         syncCodeCompletionToggle()
     }
     
@@ -110,6 +118,77 @@ class AIPreferencesFragment(
         openRouterCustomEdit = view.findViewById(R.id.openRouterCustomModelEdit)
         openRouterCustomSave = view.findViewById(R.id.openRouterCustomModelSave)
         setupOpenRouterCustomModel()
+
+        openAICompatGroup = view.findViewById(R.id.openAICompatGroup)
+        openAICompatBaseUrlEdit = view.findViewById(R.id.openAICompatBaseUrlEdit)
+        openAICompatApiKeyEdit = view.findViewById(R.id.openAICompatApiKeyEdit)
+        openAICompatModelEdit = view.findViewById(R.id.openAICompatModelEdit)
+        openAICompatSave = view.findViewById(R.id.openAICompatSave)
+        setupOpenAICompat()
+
+        streamingToggle = view.findViewById(R.id.streamingToggle)
+        diffPreviewToggle = view.findViewById(R.id.diffPreviewToggle)
+        setupStreamingAndDiffToggles()
+    }
+
+    private fun setupStreamingAndDiffToggles() {
+        val sp = android.preference.PreferenceManager.getDefaultSharedPreferences(requireContext())
+        streamingToggle?.isChecked = sp.getBoolean("ai_agent_streaming_enabled", true)
+        streamingToggle?.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean("ai_agent_streaming_enabled", checked).apply()
+            showSnackbar(if (checked) "Streaming enabled" else "Streaming disabled")
+        }
+        diffPreviewToggle?.isChecked = sp.getBoolean("ai_agent_diff_preview_enabled", false)
+        diffPreviewToggle?.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean("ai_agent_diff_preview_enabled", checked).apply()
+            showSnackbar(if (checked) "Diff preview enabled" else "Diff preview disabled")
+        }
+    }
+
+    private fun setupOpenAICompat() {
+        openAICompatBaseUrlEdit.setText(ApiKey.getOpenAICompatBaseUrl())
+        openAICompatApiKeyEdit.setText(ApiKey.getOpenAICompatApiKey())
+        openAICompatModelEdit.setText(ApiKey.getOpenAICompatModel())
+
+        openAICompatSave.setOnClickListener {
+            val baseUrl = openAICompatBaseUrlEdit.text?.toString()?.trim().orEmpty()
+            val key = openAICompatApiKeyEdit.text?.toString()?.trim().orEmpty()
+            val model = openAICompatModelEdit.text?.toString()?.trim().orEmpty()
+            if (baseUrl.isBlank() || model.isBlank()) {
+                showSnackbar("Base URL and Model id are required")
+                return@setOnClickListener
+            }
+            if (!(baseUrl.startsWith("http://") || baseUrl.startsWith("https://"))) {
+                showSnackbar("Base URL must start with http:// or https://")
+                return@setOnClickListener
+            }
+            ApiKey.setOpenAICompatBaseUrl(baseUrl)
+            ApiKey.setOpenAICompatApiKey(key)
+            ApiKey.setOpenAICompatModel(model)
+            agents.setProvider("openaicompat")
+            agents.setAgent(model)
+            aiAgent.reinitializeWithSelectedModel()
+            updateCurrentStatus()
+            updateModelDropdown()
+            refreshOpenAICompatVisibility()
+            showSnackbar("Saved OpenAI-compatible endpoint: $model")
+        }
+    }
+
+    private fun refreshOpenAICompatVisibility() {
+        val isCompat = agents.getProvider() == "openaicompat"
+        openAICompatGroup.visibility = if (isCompat) View.VISIBLE else View.GONE
+        if (isCompat) {
+            val savedBase = ApiKey.getOpenAICompatBaseUrl()
+            val savedKey = ApiKey.getOpenAICompatApiKey()
+            val savedModel = ApiKey.getOpenAICompatModel()
+            if (savedBase != openAICompatBaseUrlEdit.text?.toString())
+                openAICompatBaseUrlEdit.setText(savedBase)
+            if (savedKey != openAICompatApiKeyEdit.text?.toString())
+                openAICompatApiKeyEdit.setText(savedKey)
+            if (savedModel != openAICompatModelEdit.text?.toString())
+                openAICompatModelEdit.setText(savedModel)
+        }
     }
 
     private fun setupOpenRouterCustomModel() {
@@ -163,10 +242,11 @@ class AIPreferencesFragment(
             "deepseek" to "DeepSeek",
             "grok" to "xAI Grok",
             "openrouter" to "OpenRouter (multi-model)",
+            "openaicompat" to "OpenAI-compatible (custom URL)",
             "localllm" to "Local LLM"
         )
 
-        val allProviderIds = listOf("gemini", "openai", "claude", "deepseek", "grok", "openrouter", "localllm")
+        val allProviderIds = listOf("gemini", "openai", "claude", "deepseek", "grok", "openrouter", "openaicompat", "localllm")
         val providerNames = allProviderIds.map { providerMap[it] ?: it }
         
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, providerNames)
@@ -201,6 +281,7 @@ class AIPreferencesFragment(
             "deepseek" to "DeepSeek",
             "grok" to "xAI Grok",
             "openrouter" to "OpenRouter (multi-model)",
+            "openaicompat" to "OpenAI-compatible (custom URL)",
             "localllm" to "Local LLM"
         )
         
@@ -222,6 +303,7 @@ class AIPreferencesFragment(
             "deepseek" -> "DeepSeek"
             "grok" -> "xAI Grok"
             "openrouter" -> "OpenRouter (multi-model)"
+            "openaicompat" -> "OpenAI-compatible (custom URL)"
             "localllm" -> "Local LLM"
             else -> currentProvider.uppercase()
         }
@@ -361,7 +443,8 @@ class AIPreferencesFragment(
         
         agents.setProvider(providerId)
         refreshOpenRouterCustomModelVisibility()
-        
+        refreshOpenAICompatVisibility()
+
         updateModelDropdown()
         
         if (aiAgent.setProvider(providerId)) {
