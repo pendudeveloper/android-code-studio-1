@@ -471,6 +471,12 @@ private class OpenRouterCustomModel(
           val model = editText.text.toString().trim()
           prefManager.putString("ai_agent_openrouter_custom_model", model)
           preference.summary = getSummaryText(context)
+          android.widget.Toast.makeText(
+            context,
+            if (model.isBlank()) "Custom OpenRouter model cleared"
+            else "Saved OpenRouter model: $model",
+            android.widget.Toast.LENGTH_SHORT
+          ).show()
         }
         .setNeutralButton("Clear") { _, _ ->
           prefManager.putString("ai_agent_openrouter_custom_model", "")

@@ -5,19 +5,23 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import android.content.SharedPreferences
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.google.android.material.textview.MaterialTextView
 import com.tom.rv2ide.R
 import com.tom.rv2ide.artificial.agents.AIAgentManager
 import com.tom.rv2ide.artificial.agents.Agents
 import com.tom.rv2ide.artificial.dialogs.ProviderSwitchDialog
+import com.tom.rv2ide.artificial.secrets.ApiKey
 import com.tom.rv2ide.managers.CodeCompletionManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -36,6 +40,9 @@ class AIPreferencesFragment(
     private lateinit var codeCompletionToggle: MaterialSwitch
     private lateinit var currentProviderText: MaterialTextView
     private lateinit var currentModelText: MaterialTextView
+    private lateinit var openRouterCustomGroup: View
+    private lateinit var openRouterCustomEdit: TextInputEditText
+    private lateinit var openRouterCustomSave: MaterialButton
     
     private val providerSwitchDialog by lazy { ProviderSwitchDialog(requireContext()) }
     
@@ -83,6 +90,7 @@ class AIPreferencesFragment(
         updateCurrentStatus()
         updateProviderDropdownSelection()
         updateModelDropdown()
+        refreshOpenRouterCustomModelVisibility()
         syncCodeCompletionToggle()
     }
     
@@ -98,6 +106,53 @@ class AIPreferencesFragment(
         codeCompletionToggle = view.findViewById(R.id.codeCompletionToggle)
         currentProviderText = view.findViewById(R.id.currentProviderText)
         currentModelText = view.findViewById(R.id.currentModelText)
+        openRouterCustomGroup = view.findViewById(R.id.openRouterCustomModelGroup)
+        openRouterCustomEdit = view.findViewById(R.id.openRouterCustomModelEdit)
+        openRouterCustomSave = view.findViewById(R.id.openRouterCustomModelSave)
+        setupOpenRouterCustomModel()
+    }
+
+    private fun setupOpenRouterCustomModel() {
+        openRouterCustomEdit.setText(ApiKey.getOpenRouterCustomModel())
+
+        val saveAction = saveAction@{
+            val typed = openRouterCustomEdit.text?.toString()?.trim().orEmpty()
+            if (typed.isBlank()) {
+                ApiKey.setOpenRouterCustomModel("")
+                showSnackbar("Custom OpenRouter model cleared")
+                return@saveAction
+            }
+            if (!typed.contains('/')) {
+                showSnackbar("Model id must look like vendor/model (e.g. openai/gpt-4o-mini)")
+                return@saveAction
+            }
+            ApiKey.setOpenRouterCustomModel(typed)
+            agents.setProvider("openrouter")
+            agents.setAgent(typed)
+            aiAgent.reinitializeWithSelectedModel()
+            updateCurrentStatus()
+            updateModelDropdown()
+            showSnackbar("Saved OpenRouter model: $typed")
+        }
+
+        openRouterCustomSave.setOnClickListener { saveAction() }
+        openRouterCustomEdit.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                saveAction()
+                true
+            } else false
+        }
+    }
+
+    private fun refreshOpenRouterCustomModelVisibility() {
+        val isOpenRouter = agents.getProvider() == "openrouter"
+        openRouterCustomGroup.visibility = if (isOpenRouter) View.VISIBLE else View.GONE
+        if (isOpenRouter) {
+            val saved = ApiKey.getOpenRouterCustomModel()
+            if (saved != openRouterCustomEdit.text?.toString()) {
+                openRouterCustomEdit.setText(saved)
+            }
+        }
     }
 
     private fun setupProviderDropdown() {
@@ -290,14 +345,22 @@ class AIPreferencesFragment(
         
         val availableModels = agents.getModelsForProvider(providerId)
         android.util.Log.d("AIPreferences", "Available models for $providerId: ${availableModels.joinToString()}")
-        
-        if (availableModels.isNotEmpty()) {
+
+        if (providerId == "openrouter") {
+            val custom = ApiKey.getOpenRouterCustomModel().trim()
+            if (custom.isNotBlank()) {
+                agents.setAgent(custom)
+            } else if (availableModels.isNotEmpty()) {
+                agents.setAgent(availableModels[0])
+            }
+        } else if (availableModels.isNotEmpty()) {
             val defaultModel = availableModels[0]
             agents.setAgent(defaultModel)
             android.util.Log.d("AIPreferences", "Set default model: $defaultModel")
         }
         
         agents.setProvider(providerId)
+        refreshOpenRouterCustomModelVisibility()
         
         updateModelDropdown()
         
