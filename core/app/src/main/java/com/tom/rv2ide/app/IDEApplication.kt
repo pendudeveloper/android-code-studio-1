@@ -304,8 +304,7 @@ class IDEApplication : TermuxApplication() {
       val sw = java.io.StringWriter()
       th.printStackTrace(java.io.PrintWriter(sw))
       java.io.File(dir, "last.txt").writeText(
-        "Crash @ " + java.util.Date().toString() + "
-" + sw.toString()
+        "Crash @ " + java.util.Date().toString() + "\n" + sw.toString()
       )
     } catch (_: Throwable) { }
   }
