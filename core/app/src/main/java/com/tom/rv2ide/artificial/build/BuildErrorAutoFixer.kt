@@ -185,74 +185,36 @@ object BuildErrorAutoFixer {
 
     val prompt = context.getString(R.string.ai_agent_autofix_prompt, truncate(output, 12_000))
 
+    val live = AIFixLiveProgress(context)
+    val title = "AI fixing build error" +
+        if (cyclesUsed > 1) " (attempt $cyclesUsed/$MAX_AUTO_CYCLES)" else ""
+    live.show(title)
+
+    val callback = live.callback { success, applied, _ ->
+      if (!success) return@callback
+      if (applied == 0) return@callback
+      if (isLoopEnabled() && cyclesUsed < MAX_AUTO_CYCLES) {
+        Toast.makeText(
+          context,
+          "Re-running build (cycle $cyclesUsed/$MAX_AUTO_CYCLES)…",
+          Toast.LENGTH_SHORT,
+        ).show()
+        owner.lifecycleScope.launch { rerunLastBuild(context) }
+      } else {
+        Toast.makeText(
+          context,
+          "AI applied $applied fix(es). Re-run the build.",
+          Toast.LENGTH_LONG,
+        ).show()
+      }
+    }
+
     owner.lifecycleScope.launch {
       try {
-        manager.executeRequest(prompt, object : AIAgentManager.AIAgentCallback {
-          override fun onProcessing(message: String) {
-            log.debug("AutoFix: {}", message)
-          }
-
-          override fun onFileModifying(filePath: String, fileName: String) {
-            log.info("AutoFix modifying: {}", filePath)
-          }
-
-          override fun onFileModified(filePath: String, fileName: String, success: Boolean) {
-            log.info("AutoFix modified {} -> success={}", filePath, success)
-          }
-
-          override fun onSuccess(
-            response: String,
-            modifications: List<AIAgentManager.ModificationResult>,
-            summary: AIAgentManager.ModificationSummary
-          ) {
-            val applied = modifications.count { it.success }
-            if (applied == 0) {
-              Toast.makeText(
-                context,
-                "AI couldn't apply any fix automatically.",
-                Toast.LENGTH_LONG
-              ).show()
-              return
-            }
-
-            if (isLoopEnabled() && cyclesUsed <= MAX_AUTO_CYCLES) {
-              Toast.makeText(
-                context,
-                "AI applied $applied fix(es). Re-running build (cycle $cyclesUsed/$MAX_AUTO_CYCLES)…",
-                Toast.LENGTH_LONG
-              ).show()
-              owner.lifecycleScope.launch { rerunLastBuild(context) }
-            } else {
-              Toast.makeText(
-                context,
-                "AI applied $applied fix(es). Re-run the build.",
-                Toast.LENGTH_LONG
-              ).show()
-            }
-          }
-
-          override fun onTextResponse(
-            response: String,
-            summary: AIAgentManager.ModificationSummary
-          ) {
-            MaterialAlertDialogBuilder(context)
-              .setTitle("AI suggestion")
-              .setMessage(response.take(4000))
-              .setPositiveButton(android.R.string.ok, null)
-              .show()
-          }
-
-          override fun onError(message: String) {
-            Toast.makeText(context, "AI auto-fix failed: $message", Toast.LENGTH_LONG).show()
-          }
-
-          override fun onRetry(attemptNumber: Int, message: String) {
-            log.debug("AutoFix retry {}: {}", attemptNumber, message)
-          }
-        })
+        manager.executeRequest(prompt, callback)
       } catch (e: Exception) {
         log.error("Auto-fix request failed", e)
-        Toast.makeText(context, "AI auto-fix failed: ${e.message}", Toast.LENGTH_LONG).show()
+        callback.onError(e.message ?: e.toString())
       }
     }
   }
