@@ -166,7 +166,7 @@ fun gradleProperty(block: GradlePropertyBuilder.() -> Unit): GradleProperty {
 /** Helper object with predefined common Android gradle properties. */
 object GradlePropertiesPresets {
 
-  /** Standard Android Gradle properties. */
+  /** Standard Android Gradle properties (performance-tuned defaults). */
   val STANDARD_ANDROID =
       """
           # Project-wide Gradle settings.
@@ -174,30 +174,29 @@ object GradlePropertiesPresets {
           # Gradle settings configured through the IDE *will override*
           # any settings specified in this file.
           
-          # For more details on how to configure your build environment visit
-          # http://www.gradle.org/docs/current/userguide/build_environment.html
+          # JVM arguments for the Gradle daemon. 4GB heap is enough for typical
+          # Android builds; reduce on RAM-constrained devices.
+          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+UseParallelGC -Dfile.encoding=UTF-8
           
-          # Specifies the JVM arguments used for the daemon process.
-          # The setting is particularly useful for tweaking memory settings.
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          # Performance: keep the daemon alive, build modules in parallel, reuse
+          # the task output cache between builds, and only configure what's needed.
+          org.gradle.daemon=true
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          org.gradle.configureondemand=true
           
-          # When configured, Gradle will run in incubating parallel mode.
-          # This option should only be used with decoupled projects. More details, visit
-          # http://www.gradle.org/docs/current/userguide/multi_project_builds.html#sec:decoupled_projects
-          # org.gradle.parallel=true
+          # Kotlin: use incremental compilation and a long-running compiler daemon.
+          kotlin.incremental=true
+          kotlin.incremental.useClasspathSnapshot=true
+          kotlin.daemon.jvmargs=-Xmx2048m
           
-          # AndroidX package structure to make it clearer which packages are bundled with the
-          # Android operating system, and which are packaged with your app's APK
-          # https://developer.android.com/topic/libraries/support-library/androidx-rn
+          # AndroidX, non-transitive R, no Jetifier (Jetifier slows builds).
           android.useAndroidX=true
-          
-          # Kotlin code style for this project: "official" or "obsolete":
-          kotlin.code.style=official
-          
-          # Enables namespacing of each library's R class so that its R class includes only the
-          # resources declared in the library itself and none from the library's dependencies,
-          # thereby reducing the size of the R class for that library
           android.nonTransitiveRClass=true
+          android.enableJetifier=false
+          
+          # Kotlin code style: "official" or "obsolete":
+          kotlin.code.style=official
       """
           .trimIndent()
 

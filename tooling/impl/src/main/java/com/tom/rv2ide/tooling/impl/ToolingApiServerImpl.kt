@@ -227,19 +227,42 @@ internal class ToolingApiServerImpl(private val project: ProjectImpl) : ITooling
       if (propsFile.exists()) propsFile.inputStream().use { props.load(it) }
 
       val jvmArgsKey = "org.gradle.jvmargs"
-      val enforced =
+      val localeArgs =
           "-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8 -Duser.language=en -Duser.country=US"
-      val current = props.getProperty(jvmArgsKey)?.trim().orEmpty()
-      if (!current.contains("file.encoding")) {
-        props.setProperty(jvmArgsKey, if (current.isBlank()) enforced else "$current $enforced")
+      var jvmArgs = props.getProperty(jvmArgsKey)?.trim().orEmpty()
+      if (!jvmArgs.contains("file.encoding")) {
+        jvmArgs = if (jvmArgs.isBlank()) localeArgs else "$jvmArgs $localeArgs"
       }
+      if (!jvmArgs.contains("-Xmx")) {
+        jvmArgs = "-Xmx4096m -XX:MaxMetaspaceSize=1024m -XX:+UseParallelGC $jvmArgs"
+      }
+      props.setProperty(jvmArgsKey, jvmArgs.trim())
+
+      fun fillIfAbsent(key: String, value: String) {
+        if (props.getProperty(key).isNullOrBlank()) {
+          props.setProperty(key, value)
+        }
+      }
+
+      fillIfAbsent("org.gradle.daemon", "true")
+      fillIfAbsent("org.gradle.parallel", "true")
+      fillIfAbsent("org.gradle.caching", "true")
+      fillIfAbsent("org.gradle.configureondemand", "true")
+      fillIfAbsent("org.gradle.workers.max", Runtime.getRuntime().availableProcessors().toString())
+      fillIfAbsent("kotlin.incremental", "true")
+      fillIfAbsent("kotlin.incremental.useClasspathSnapshot", "true")
+      fillIfAbsent("kotlin.daemon.jvmargs", "-Xmx2048m")
+      fillIfAbsent("android.useAndroidX", "true")
+      fillIfAbsent("android.nonTransitiveRClass", "true")
+      fillIfAbsent("android.enableJetifier", "false")
+
       props.setProperty("systemProp.file.encoding", "UTF-8")
       props.setProperty("systemProp.sun.jnu.encoding", "UTF-8")
       props.setProperty("systemProp.user.language", "en")
       props.setProperty("systemProp.user.country", "US")
 
       propsFile.outputStream().use { out ->
-        props.store(out, "AndroidIDE: enforce UTF-8 & locale for Gradle daemon")
+        props.store(out, "AndroidIDE: encoding + build performance defaults")
       }
     } catch (_: Throwable) {
       // best-effort; ignore
