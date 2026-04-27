@@ -144,6 +144,16 @@ class AIPreferencesFragment(
             sp.edit().putBoolean("ai_agent_diff_preview_enabled", checked).apply()
             showSnackbar(if (checked) "Diff preview enabled" else "Diff preview disabled")
         }
+
+        val planningToggle = view?.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.planningModeToggle)
+        val initiallyOn = sp.getBoolean("ai_agent_planning_mode_enabled", false)
+        planningToggle?.isChecked = initiallyOn
+        com.tom.rv2ide.artificial.rules.WritingRules.planningModeEnabled = initiallyOn
+        planningToggle?.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean("ai_agent_planning_mode_enabled", checked).apply()
+            com.tom.rv2ide.artificial.rules.WritingRules.planningModeEnabled = checked
+            showSnackbar(if (checked) "Planning mode enabled" else "Planning mode disabled")
+        }
     }
 
     private fun setupOpenAICompat() {

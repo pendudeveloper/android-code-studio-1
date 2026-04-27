@@ -50,6 +50,16 @@
 | Conversation export (markdown + JSON) | New |
 | OpenRouter fallback chain (free → free → free) | New |
 | Crash → AI auto-prefill on next launch | New |
+| `@filename` mentions in chat auto-attach file contents | New |
+| Voice input (Bengali + English, device speech recognizer) | New |
+| Provider-preset picker (Together / Groq / DeepInfra / Fireworks / Anyscale / Mistral / Perplexity / OpenAI / OpenRouter / Ollama / vLLM) | New |
+| Auto-detect local Ollama | New |
+| Settings JSON export / import | New |
+| Offline indicator (skip 30 s watchdog when no network) | New |
+| Sensitive-data detection in outgoing prompts | New |
+| `ai_backups/` retention (30 days / 200 files max) | New |
+| Planning mode (think-then-plan-then-code) toggle | New |
+| Markdown pipe-table rendering in AI replies | New |
 | Image input (vision models) | Planned |
 | Inline ghost text (Copilot-style) | Planned |
 | Multi-file smart context picker | Planned |
@@ -82,12 +92,23 @@ When a Gradle build fails:
 - **Model / Agent box** — fully editable; type any model id (e.g. `deepseek/deepseek-chat-v3.1:free`), tap Done, it persists
 - **API key dialogs** — per provider
 - **OpenAI-compatible group** — Base URL + API key + Model id, with `Save endpoint` button and URL normalization (`/v1`, `/v1/chat/completions`, or just domain — all work)
+  - **Use a preset** — one-tap URL fill for Together / Groq / DeepInfra / Fireworks / Anyscale / Mistral / Perplexity / OpenAI / OpenRouter / Ollama (emulator + LAN) / vLLM
+  - **Auto-detect local Ollama** — probes `10.0.2.2:11434`, `localhost:11434`, LAN; on hit fills URL and lists installed models
 - **Custom OpenRouter model** — saved name appears in the main Model/Agent box and survives app restart
 - **Streaming responses** toggle (default ON)
 - **Diff preview before applying** toggle (default OFF)
 - **Auto-rebuild after AI fix** toggle (default OFF)
 - **Auto-switch on quota/rate-limit** toggle
 - **Code completion** toggle
+- **Planning mode** toggle — asks the model to emit a short plan before any code
+- **Export / Import settings** — JSON file in `Downloads/AndroidCodeStudio/`, preserves all provider keys, base URLs, model ids, and toggles (schema-versioned)
+
+### Chat tab extras
+
+- **Voice input** — mic button next to Clear. Uses the device's speech recognizer (Bengali + English on most phones). Recognised text is appended to whatever you've already typed.
+- **`@filename.kt` mentions** — type `@MainActivity.kt` in your prompt; the IDE scans the open project, prepends the matched file(s) to the prompt as explicit context (max 8 files × 32 KB), and still passes your original intent through so the model sees both.
+- **Offline guard** — if the device has no validated internet, the request returns immediately with a clear message instead of waiting 30 seconds.
+- **Sensitive-data warning** — if your prompt contains what looks like a real API key / token / private-key block, a warning is shown before sending.
 
 ---
 
@@ -129,6 +150,12 @@ When a Gradle build fails:
 - Custom OpenRouter model name didn't persist visually in the main Model/Agent box. Fixed — typed name is added to the dropdown list, persists across app restarts, and is restored from preferences.
 - Chat tab Send button was off-screen on narrow phones (Export + Clear were eating row width). Fixed — Export and Clear are now icon-only, Send is anchored full-width.
 - Various AI agent message-routing bugs around streaming and modification callbacks.
+- Provider switch was leaving stale model ids attached (e.g. picking OpenAI-compat while an OpenRouter `vendor/model` slug was still active made the upstream 400). `AIPreferencesFragment.handleProviderChange` now persists the provider **before** calling `setAgent`, and restores the saved OpenAI-compat model id on switch.
+- `AIAgentManager` hardcoded `setProvider("gemini")` on init, so auto-fix ignored the user's saved preference even though chat honoured it. It now reads `Agents.getProvider()`. `BuildErrorAutoFixer` also force-sets the saved provider before hitting the upstream, regardless of what the fallback chain selected.
+- Error bubbles were inlining 500-character stack traces. They are now short ("provider / type / message"); the full trace stays in logcat.
+- Model dropdown could show the same id twice when the user typed a model that was already part of the curated list — deduped.
+- Preferences changes (API key, base URL, model) used to require an app restart to take effect. `AIAgentManager` now registers a `SharedPreferences.OnSharedPreferenceChangeListener` that re-initialises the active agent as soon as anything `ai_agent_*` / `ai_provider*` changes.
+- Live-progress `Cancel` button used to leave the dialog open — user had to tap OK separately. It now auto-dismisses 1.2 s after cancellation.
 
 ---
 

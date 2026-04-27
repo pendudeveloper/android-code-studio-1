@@ -95,8 +95,12 @@ class AIAgentManager(private val context: Context) {
         }
 
         try {
-            android.preference.PreferenceManager.getDefaultSharedPreferences(context)
-                .registerOnSharedPreferenceChangeListener(prefsListener)
+            val sp = android.preference.PreferenceManager.getDefaultSharedPreferences(context)
+            sp.registerOnSharedPreferenceChangeListener(prefsListener)
+            // Re-hydrate in-memory WritingRules toggles so the agent picks them
+            // up even on first launch — before the user ever opens preferences.
+            com.tom.rv2ide.artificial.rules.WritingRules.planningModeEnabled =
+                sp.getBoolean("ai_agent_planning_mode_enabled", false)
         } catch (e: Throwable) {
             android.util.Log.w("AIAgentManager", "Could not register prefs listener: ${e.message}")
         }

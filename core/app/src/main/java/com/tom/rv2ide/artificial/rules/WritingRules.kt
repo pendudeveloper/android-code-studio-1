@@ -28,15 +28,33 @@ object WritingRules {
     @Volatile
     var projectMemory: String? = null
 
+    /** When true, append a 'think-then-plan-then-code' directive to the system prompt. */
+    @Volatile
+    var planningModeEnabled: Boolean = false
+
     class Instructions {
         fun useThis(): String {
             val base = baseRules()
-            val mem = projectMemory?.takeIf { it.isNotBlank() } ?: return base
-            return base + """
-
+            val pieces = mutableListOf(base)
+            if (planningModeEnabled) {
+                pieces += """
+        [ PLANNING MODE — requested by user ]
+        Before writing any code or FILE_TO_MODIFY blocks, output a short plan:
+        1. What files will you touch (list them with a one-line reason each)?
+        2. What's the step-by-step ordering?
+        3. What could go wrong (compile errors, missing deps, required permissions)?
+        Then, below that plan, produce the actual code / modifications.
+        Keep the plan concise — no more than 8 numbered steps.
+                """.trimIndent()
+            }
+            val mem = projectMemory?.takeIf { it.isNotBlank() }
+            if (mem != null) {
+                pieces += """
         [ PROJECT MEMORY — user-maintained notes ]
         $mem
-        """.trimIndent()
+                """.trimIndent()
+            }
+            return pieces.joinToString("\n\n")
         }
 
         private fun baseRules(): String = """
