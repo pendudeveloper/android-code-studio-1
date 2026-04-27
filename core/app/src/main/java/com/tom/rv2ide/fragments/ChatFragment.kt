@@ -198,7 +198,51 @@ class ChatFragment(
             exportConversation()
         }
 
+        requireView().findViewById<MaterialButton>(R.id.voiceBtn)?.setOnClickListener {
+            launchVoiceInput()
+        }
+
         wireTemplates()
+    }
+
+    /**
+     * Launch the system speech-to-text picker. The returned text is appended to
+     * whatever the user already typed so they can dictate over multiple shots.
+     * Supports any language the device has a recognition model for (including
+     * Bengali + English on most devices).
+     */
+    private fun launchVoiceInput() {
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+            )
+            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Dictate your request")
+            putExtra(
+                android.speech.RecognizerIntent.EXTRA_LANGUAGE,
+                java.util.Locale.getDefault().toLanguageTag(),
+            )
+        }
+        try {
+            voiceInputLauncher.launch(intent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            showSnackbar("Speech recognition is not available on this device.")
+        }
+    }
+
+    private val voiceInputLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != android.app.Activity.RESULT_OK) return@registerForActivityResult
+        val matches = result.data
+            ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            ?: return@registerForActivityResult
+        val spoken = matches.firstOrNull()?.trim().orEmpty()
+        if (spoken.isBlank()) return@registerForActivityResult
+        val existing = promptInput.text?.toString().orEmpty()
+        val combined = if (existing.isBlank()) spoken else "$existing $spoken"
+        promptInput.setText(combined)
+        promptInput.setSelection(combined.length)
     }
 
     private fun wireTemplates() {

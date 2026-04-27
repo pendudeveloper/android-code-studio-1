@@ -88,6 +88,7 @@ class AIPreferencesFragment(
         setupProviderDropdown()
         setupModelDropdown()
         setupToggles()
+        setupBackupButtons()
         updateCurrentStatus()
         startCompletionStateMonitoring()
     }
@@ -154,6 +155,10 @@ class AIPreferencesFragment(
             showOpenAICompatPresets()
         }
 
+        view?.findViewById<MaterialButton>(R.id.openAICompatDetectOllama)?.setOnClickListener {
+            detectOllamaAsync()
+        }
+
         openAICompatSave.setOnClickListener {
             val baseUrl = openAICompatBaseUrlEdit.text?.toString()?.trim().orEmpty()
             val key = openAICompatApiKeyEdit.text?.toString()?.trim().orEmpty()
@@ -199,6 +204,39 @@ class AIPreferencesFragment(
         Triple("Ollama (local LAN)", "http://localhost:11434/v1", "e.g. llama3.1:8b"),
         Triple("vLLM (self-hosted)", "http://localhost:8000/v1", "e.g. meta-llama/Llama-3-8B-Instruct"),
     )
+
+    /**
+     * Probe a handful of common Ollama endpoints and, if one responds, offer
+     * to select it. Runs on a background coroutine so the UI stays responsive.
+     */
+    private fun detectOllamaAsync() {
+        showSnackbar("Probing Ollama on 10.0.2.2:11434 / localhost:11434 …")
+        lifecycleScope.launch {
+            val detection = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    com.tom.rv2ide.artificial.agents.openaicompat.OllamaDetector.probeBlocking()
+                } catch (_: Throwable) { null }
+            }
+            if (detection == null) {
+                showSnackbar("No local Ollama found. Make sure `ollama serve` is running.")
+                return@launch
+            }
+            openAICompatBaseUrlEdit.setText(detection.baseUrl)
+            val models = detection.models
+            if (models.isNotEmpty()) {
+                com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                    .setTitle("Ollama detected at ${detection.baseUrl}")
+                    .setItems(models.toTypedArray()) { _, which ->
+                        openAICompatModelEdit.setText(models[which])
+                        showSnackbar("Model set to ${models[which]}. Tap Save endpoint to activate.")
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            } else {
+                showSnackbar("Ollama detected at ${detection.baseUrl} but no models — run `ollama pull llama3.1`.")
+            }
+        }
+    }
 
     private fun showOpenAICompatPresets() {
         val labels = openAICompatPresets.map { (name, url, hint) -> "$name\n$url\n$hint" }.toTypedArray()
@@ -423,6 +461,63 @@ class AIPreferencesFragment(
         when {
             currentModel.isNotBlank() -> modelDropdown.setText(currentModel, false)
             displayModels.isNotEmpty() -> modelDropdown.setText(displayModels[0], false)
+        }
+    }
+
+    private fun setupBackupButtons() {
+        view?.findViewById<MaterialButton>(R.id.backupExportBtn)?.setOnClickListener {
+            lifecycleScope.launch {
+                try {
+                    val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.tom.rv2ide.artificial.settings.SettingsBackup.exportToDownloads(requireContext())
+                    }
+                    showSnackbar("Saved: ${file.absolutePath}")
+                } catch (e: Throwable) {
+                    showSnackbar("Export failed: ${e.message}")
+                }
+            }
+        }
+        view?.findViewById<MaterialButton>(R.id.backupImportBtn)?.setOnClickListener {
+            val intent = android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                putExtra(android.content.Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "text/plain"))
+            }
+            try { importBackupLauncher.launch(intent) }
+            catch (_: android.content.ActivityNotFoundException) {
+                showSnackbar("No file picker available on this device.")
+            }
+        }
+    }
+
+    private val importBackupLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != android.app.Activity.RESULT_OK) return@registerForActivityResult
+        val uri = result.data?.data ?: return@registerForActivityResult
+        lifecycleScope.launch {
+            val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val body = requireContext().contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.bufferedReader().readText()
+                    } ?: return@withContext com.tom.rv2ide.artificial.settings.SettingsBackup.ImportResult(
+                        0, "Could not read selected file.",
+                    )
+                    com.tom.rv2ide.artificial.settings.SettingsBackup.import(requireContext(), body)
+                } catch (e: Throwable) {
+                    com.tom.rv2ide.artificial.settings.SettingsBackup.ImportResult(0, e.message)
+                }
+            }
+            if (outcome.error != null) {
+                showSnackbar("Import failed: ${outcome.error}")
+            } else {
+                showSnackbar("Imported ${outcome.applied} settings. Restart AI if needed.")
+                aiAgent.reinitializeWithSelectedModel()
+                updateCurrentStatus()
+                updateModelDropdown()
+                refreshOpenAICompatVisibility()
+                refreshOpenRouterCustomModelVisibility()
+            }
         }
     }
 
