@@ -71,6 +71,42 @@ object MarkdownRenderer {
         continue
       }
 
+      // Pipe-table block — at start of line, contains `|`, and the next line
+      // is a `---|---` separator. Render with HtmlCompat-friendly <table>.
+      if ((i == 0 || src[i - 1] == '\n') && src[i] == '|') {
+        val lineEnd = src.indexOf('\n', i).let { if (it < 0) src.length else it }
+        val header = src.substring(i, lineEnd)
+        val sepStart = lineEnd + 1
+        val sepEnd = if (sepStart >= src.length) -1 else
+          src.indexOf('\n', sepStart).let { if (it < 0) src.length else it }
+        val sep = if (sepEnd >= 0) src.substring(sepStart, sepEnd) else ""
+        if (header.contains('|') && sep.matches(Regex("\\s*\\|?\\s*:?-{2,}:?(\\s*\\|\\s*:?-{2,}:?)*\\s*\\|?\\s*"))) {
+          val rows = mutableListOf<String>(header)
+          var cursor = sepEnd
+          if (cursor < src.length && src[cursor] == '\n') cursor++
+          while (cursor < src.length) {
+            val rowEnd = src.indexOf('\n', cursor).let { if (it < 0) src.length else it }
+            val row = src.substring(cursor, rowEnd)
+            if (!row.contains('|')) break
+            rows.add(row)
+            cursor = rowEnd
+            if (cursor < src.length && src[cursor] == '\n') cursor++
+            else break
+          }
+          out.append("<table border='1' cellpadding='4'>")
+          rows.forEachIndexed { rowIdx, raw ->
+            val cells = raw.trim().trim('|').split('|').map { it.trim() }
+            val tag = if (rowIdx == 0) "th" else "td"
+            out.append("<tr>")
+            cells.forEach { c -> out.append("<").append(tag).append(">").append(inline(c)).append("</").append(tag).append(">") }
+            out.append("</tr>")
+          }
+          out.append("</table><br/>")
+          i = cursor
+          continue
+        }
+      }
+
       // Plain line up to next newline, with inline markup.
       val lineEnd = src.indexOf('\n', i).let { if (it < 0) src.length else it }
       val text = src.substring(i, lineEnd)

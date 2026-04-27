@@ -53,8 +53,51 @@ class AIRequestHandler(
                 }
 
                 SessionLog.add(SessionLog.Entry("user", userRequest))
-                executeAIRequest(userRequest)
-                
+
+                // Surface obvious offline state up front so the user doesn't sit
+                // through a 30 s watchdog when they're on airplane mode.
+                if (!com.tom.rv2ide.artificial.safety.PromptSafety.isOnline(executeBtn.context)) {
+                    withContext(Dispatchers.Main) {
+                        executeBtn.isEnabled = true
+                        progressIndicator.visibility = View.GONE
+                        statusText.text = "🌐 No internet connection. Check Wi-Fi / mobile data and try again."
+                    }
+                    return@launch
+                }
+
+                // Warn the user once if their prompt visibly contains a secret —
+                // they may have pasted a key or token by mistake. The request is
+                // still sent (we can't fully redact reliably), but the warning
+                // gives them a chance to abort.
+                val secrets = com.tom.rv2ide.artificial.safety.PromptSafety.findSecrets(userRequest)
+                if (secrets.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        statusText.text = "⚠️ Possible secret detected in prompt (${secrets.size}). Sending anyway."
+                    }
+                }
+
+                // Expand any `@filename` mentions into attached file context so the
+                // model sees the actual contents of the files the user is asking
+                // about, rather than relying on its own guess.
+                val expanded = com.tom.rv2ide.artificial.text.MentionResolver.resolve(
+                    userRequest,
+                    aiAgent.getProjectRoot(),
+                )
+                if (expanded.resolved.isNotEmpty() || expanded.unresolved.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        val pieces = mutableListOf<String>()
+                        if (expanded.resolved.isNotEmpty()) {
+                            pieces += "Attached: " + expanded.resolved.joinToString(", ")
+                        }
+                        if (expanded.unresolved.isNotEmpty()) {
+                            pieces += "Could not find: " + expanded.unresolved.joinToString(", ")
+                        }
+                        statusText.text = pieces.joinToString("\n")
+                    }
+                }
+
+                executeAIRequest(expanded.expandedPrompt)
+
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     executeBtn.isEnabled = true

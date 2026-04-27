@@ -105,6 +105,14 @@
                 android:textColor="?attr/colorPrimary"
                 android:layout_marginBottom="8dp" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/openAICompatPresets"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="Use a preset (Together / Groq / Ollama / DeepInfra / Fireworks)"
+                style="@style/Widget.Material3.Button.OutlinedButton" />
+
             <com.google.android.material.textfield.TextInputLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

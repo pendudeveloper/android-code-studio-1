@@ -121,7 +121,9 @@ class AIFixLiveProgress(private val context: Context) {
         .create()
     dialog?.show()
 
-    // Cancel button — abort the AI request without dismissing the dialog.
+    // Cancel button — abort the AI request and auto-dismiss the dialog after a
+    // brief delay so the user can see the cancellation log line confirm the
+    // action took effect, without having to tap OK separately.
     dialog?.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
       onCancel?.invoke()
       runOnUi {
@@ -130,6 +132,9 @@ class AIFixLiveProgress(private val context: Context) {
         finish(success = false)
         showOkButton()
       }
+      mainHandler.postDelayed({
+        try { dialog?.dismiss() } catch (_: Throwable) { /* already gone */ }
+      }, 1200L)
     }
 
     // Make the dialog tall enough that the user can actually see the live

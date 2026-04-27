@@ -43,6 +43,30 @@ class AIAgentManager(private val context: Context) {
     private var currentAgent: AIAgent? = null
     private val providerSwitchDialog = ProviderSwitchDialog(context)
 
+    /**
+     * Listener that re-initialises the agent when any AI-related preference
+     * changes (api keys, base url, model, provider). This avoids the
+     * "I just updated my key in settings but the chat still uses the old one
+     * until I restart the app" class of bug.
+     */
+    private val prefsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == null) return@OnSharedPreferenceChangeListener
+        val watched = AI_PREF_KEYS_PREFIXES.any { key.startsWith(it) } || key in AI_PREF_KEYS_EXACT
+        if (!watched) return@OnSharedPreferenceChangeListener
+        try {
+            val saved = Agents(context).getProvider()
+            if (saved == currentProviderId) {
+                // Same provider — reinit it so it picks up any model / base URL / key updates.
+                reinitializeWithSelectedModel()
+            } else {
+                // Provider switched out from under us. Try to honour the new pick.
+                setProvider(saved)
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w("AIAgentManager", "Reinit on prefs change failed: ${e.message}")
+        }
+    }
+
     init {
         Gemini.registerAgent()
         OpenAI.registerAgent()
@@ -69,9 +93,30 @@ class AIAgentManager(private val context: Context) {
                 "Saved provider '$savedProvider' has no valid key; currentAgent=null",
             )
         }
+
+        try {
+            android.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                .registerOnSharedPreferenceChangeListener(prefsListener)
+        } catch (e: Throwable) {
+            android.util.Log.w("AIAgentManager", "Could not register prefs listener: ${e.message}")
+        }
+    }
+
+    companion object {
+        private val AI_PREF_KEYS_PREFIXES = listOf(
+            "ai_agent_",          // ai_agent_*_api_key, ai_agent_openaicompat_*, ai_agent_model_name
+            "ai_provider",        // ai_provider_name
+        )
+        private val AI_PREF_KEYS_EXACT = setOf(
+            "ai_agent_streaming_enabled",
+            "ai_agent_diff_preview_enabled",
+        )
     }
     
     fun getCurrentAgent(): AIAgent? = currentAgent
+
+    /** Currently-loaded project root, or null if no project is open. */
+    fun getProjectRoot(): File? = currentProjectRoot
 
     fun setProvider(providerId: String): Boolean {
         android.util.Log.d("AIAgentManager", "setProvider called with: $providerId")
@@ -417,26 +462,28 @@ class AIAgentManager(private val context: Context) {
 
     private fun formatErrorMessage(error: Throwable): String {
         val errorMessage = error.message ?: "Unknown error occurred"
-        val stackTrace = error.stackTraceToString().take(500)
         val providerName = currentAgent?.providerName ?: "Unknown"
-        
+
+        // Keep the user-facing error short — full stack trace stays in logcat.
+        // Only show the exception type for unknown errors so they have a search
+        // term, but never inline a 500-char dump in the chat bubble.
         return when (error) {
-            is com.tom.rv2ide.artificial.exceptions.RateLimitException -> 
+            is com.tom.rv2ide.artificial.exceptions.RateLimitException ->
                 "⚠️ RATE LIMIT EXCEEDED\n\nThe API rate limit has been exceeded.\nPlease wait a few minutes before trying again.\n\nDetails: $errorMessage"
-            is com.tom.rv2ide.artificial.exceptions.QuotaExceededException -> 
+            is com.tom.rv2ide.artificial.exceptions.QuotaExceededException ->
                 "⚠️ QUOTA EXCEEDED\n\nYour API quota has been exhausted.\nPlease check your billing or upgrade your plan.\n\nDetails: $errorMessage"
-            is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException -> 
-                "💳 INSUFFICIENT BALANCE\n\nYour account balance is too low to process this request.\nPlease add credits or upgrade your plan.\n\nProvider: $providerName\n\nDetails: $errorMessage"
-            is com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException -> 
-                "❌ INVALID API KEY\n\nThe API key is invalid or expired.\nPlease update your API key in the configuration.\n\nDetails: $errorMessage"
+            is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException ->
+                "💳 INSUFFICIENT BALANCE\n\nProvider: $providerName\nYour account balance is too low to process this request.\n\nDetails: $errorMessage"
+            is com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException ->
+                "❌ INVALID API KEY\n\nThe API key is invalid or expired.\nPlease update it in Preferences → AI.\n\nDetails: $errorMessage"
             is java.net.UnknownHostException ->
-                "🌐 NETWORK ERROR\n\nCould not connect to the API server.\nPlease check your internet connection.\n\nDetails: $errorMessage"
+                "🌐 NETWORK ERROR\n\nCould not reach the API server. Check your internet connection.\n\nDetails: $errorMessage"
             is java.net.SocketTimeoutException ->
-                "⏱️ TIMEOUT ERROR\n\nThe request took too long to complete.\nPlease try again.\n\nDetails: $errorMessage"
+                "⏱️ TIMEOUT ERROR\n\nThe request took too long to complete.\nProvider may be slow — try a faster model.\n\nDetails: $errorMessage"
             is org.json.JSONException ->
-                "📄 JSON PARSING ERROR\n\nFailed to parse API response.\nThe API may be experiencing issues.\n\nDetails: $errorMessage"
-            else -> 
-                "❌ ERROR OCCURRED\n\nProvider: $providerName\nError Type: ${error.javaClass.simpleName}\n\nMessage: $errorMessage\n\nStack Trace (first 500 chars):\n$stackTrace"
+                "📄 RESPONSE PARSE ERROR\n\nThe upstream returned a body we couldn't read as JSON.\n\nDetails: $errorMessage"
+            else ->
+                "❌ ERROR\n\nProvider: $providerName\nType: ${error.javaClass.simpleName}\nMessage: $errorMessage"
         }
     }
 

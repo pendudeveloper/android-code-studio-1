@@ -87,12 +87,43 @@ class AIFileWriter(private val context: Context) {
                 .format(Date())
             val backupFileName = "${file.nameWithoutExtension}_backup_$timestamp.${file.extension}"
             val backupFile = File(backupDir, backupFileName)
-            
+
             file.copyTo(backupFile, overwrite = true)
+            // Apply retention policy in the background so the active write isn't
+            // blocked by directory enumeration on large backup folders.
+            try { pruneBackups() } catch (_: Throwable) { /* best-effort */ }
             FileWriteResult.Success(backupFile.absolutePath, backupCreated = true)
         } catch (e: Exception) {
             FileWriteResult.Error("Failed to create backup: ${e.message}")
         }
+    }
+
+    /**
+     * Drop backups older than [BACKUP_MAX_AGE_MS] and keep at most
+     * [BACKUP_MAX_FILES] of the most-recent ones to prevent the backup folder
+     * from filling the user's data partition over months of use.
+     */
+    private fun pruneBackups() {
+        val files = backupDir.listFiles()?.toMutableList() ?: return
+        if (files.isEmpty()) return
+        val now = System.currentTimeMillis()
+        // Pass 1: age cutoff.
+        files.removeAll { f ->
+            val tooOld = (now - f.lastModified()) > BACKUP_MAX_AGE_MS
+            if (tooOld) f.delete()
+            tooOld
+        }
+        // Pass 2: cap count.
+        if (files.size > BACKUP_MAX_FILES) {
+            files.sortByDescending { it.lastModified() }
+            files.drop(BACKUP_MAX_FILES).forEach { it.delete() }
+        }
+    }
+
+    companion object {
+        // ~ 30 days.
+        private const val BACKUP_MAX_AGE_MS = 30L * 24 * 60 * 60 * 1000
+        private const val BACKUP_MAX_FILES = 200
     }
 
     fun getBackups(): List<BackupFile> {

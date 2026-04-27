@@ -150,6 +150,10 @@ class AIPreferencesFragment(
         openAICompatApiKeyEdit.setText(ApiKey.getOpenAICompatApiKey())
         openAICompatModelEdit.setText(ApiKey.getOpenAICompatModel())
 
+        view?.findViewById<MaterialButton>(R.id.openAICompatPresets)?.setOnClickListener {
+            showOpenAICompatPresets()
+        }
+
         openAICompatSave.setOnClickListener {
             val baseUrl = openAICompatBaseUrlEdit.text?.toString()?.trim().orEmpty()
             val key = openAICompatApiKeyEdit.text?.toString()?.trim().orEmpty()
@@ -173,6 +177,40 @@ class AIPreferencesFragment(
             refreshOpenAICompatVisibility()
             showSnackbar("Saved OpenAI-compatible endpoint: $model")
         }
+    }
+
+    /**
+     * Curated list of common OpenAI-compatible providers. Tapping one fills in
+     * the Base URL field so the user only has to paste their key + a model id.
+     * Profiles deliberately do NOT auto-set the api key — keys are user-private
+     * and we want the user to make a deliberate choice about what to paste.
+     */
+    private val openAICompatPresets: List<Triple<String, String, String>> = listOf(
+        Triple("Together AI", "https://api.together.xyz/v1", "e.g. mistralai/Mixtral-8x7B-Instruct-v0.1"),
+        Triple("Groq (fast)", "https://api.groq.com/openai/v1", "e.g. llama-3.1-70b-versatile"),
+        Triple("DeepInfra", "https://api.deepinfra.com/v1/openai", "e.g. meta-llama/Meta-Llama-3.1-70B-Instruct"),
+        Triple("Fireworks", "https://api.fireworks.ai/inference/v1", "e.g. accounts/fireworks/models/llama-v3p1-70b-instruct"),
+        Triple("Anyscale", "https://api.endpoints.anyscale.com/v1", "e.g. meta-llama/Llama-3-70b-chat-hf"),
+        Triple("Mistral (la Plateforme)", "https://api.mistral.ai/v1", "e.g. mistral-large-latest"),
+        Triple("Perplexity", "https://api.perplexity.ai", "e.g. llama-3.1-sonar-large-128k-online"),
+        Triple("OpenAI (official)", "https://api.openai.com/v1", "e.g. gpt-4o-mini"),
+        Triple("OpenRouter (legacy via compat)", "https://openrouter.ai/api/v1", "e.g. openai/gpt-4o-mini"),
+        Triple("Ollama (local on emulator)", "http://10.0.2.2:11434/v1", "e.g. llama3.1:8b"),
+        Triple("Ollama (local LAN)", "http://localhost:11434/v1", "e.g. llama3.1:8b"),
+        Triple("vLLM (self-hosted)", "http://localhost:8000/v1", "e.g. meta-llama/Llama-3-8B-Instruct"),
+    )
+
+    private fun showOpenAICompatPresets() {
+        val labels = openAICompatPresets.map { (name, url, hint) -> "$name\n$url\n$hint" }.toTypedArray()
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Pick a preset")
+            .setItems(labels) { _, which ->
+                val (_, url, _) = openAICompatPresets[which]
+                openAICompatBaseUrlEdit.setText(url)
+                showSnackbar("Base URL set — paste your API key + model id, then Save endpoint.")
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun refreshOpenAICompatVisibility() {
@@ -368,7 +406,10 @@ class AIPreferencesFragment(
             if (custom.isNotBlank() && custom !in base) base.add(0, custom)
         }
         if (saved.isNotBlank() && saved !in base) base.add(0, saved)
-        return base
+        // Defensive dedupe: previously the same id could appear twice when the user
+        // typed a model that was also part of the curated list (e.g. picking
+        // `openai/gpt-4o-mini` from OpenRouter and saving it as a custom model).
+        return base.distinct()
     }
 
     private fun updateModelDropdown() {
@@ -468,24 +509,39 @@ class AIPreferencesFragment(
 
     private fun handleProviderChange(providerId: String, providerName: String) {
         android.util.Log.d("AIPreferences", "Switching to provider: $providerId")
-        
+
+        // CRITICAL: persist the provider choice BEFORE setting the agent. setAgent()
+        // reads the current provider to decide whether free-form (vendor/model) ids
+        // belong to OpenRouter or stay attached to the previously-selected provider —
+        // doing this in the wrong order leaves stale ids attached to the old provider.
+        agents.setProvider(providerId)
+
         val availableModels = agents.getModelsForProvider(providerId)
         android.util.Log.d("AIPreferences", "Available models for $providerId: ${availableModels.joinToString()}")
 
-        if (providerId == "openrouter") {
-            val custom = ApiKey.getOpenRouterCustomModel().trim()
-            if (custom.isNotBlank()) {
-                agents.setAgent(custom)
-            } else if (availableModels.isNotEmpty()) {
-                agents.setAgent(availableModels[0])
+        when (providerId) {
+            "openrouter" -> {
+                val custom = ApiKey.getOpenRouterCustomModel().trim()
+                when {
+                    custom.isNotBlank() -> agents.setAgent(custom)
+                    availableModels.isNotEmpty() -> agents.setAgent(availableModels[0])
+                }
             }
-        } else if (availableModels.isNotEmpty()) {
-            val defaultModel = availableModels[0]
-            agents.setAgent(defaultModel)
-            android.util.Log.d("AIPreferences", "Set default model: $defaultModel")
+            "openaicompat" -> {
+                // Restore the user's saved OpenAI-compatible model id; do NOT carry
+                // over a model name from a different provider (e.g. an OpenRouter
+                // `vendor/model` slug that the upstream wouldn't recognise).
+                val saved = ApiKey.getOpenAICompatModel().trim()
+                if (saved.isNotBlank()) agents.setAgent(saved)
+            }
+            else -> {
+                if (availableModels.isNotEmpty()) {
+                    val defaultModel = availableModels[0]
+                    agents.setAgent(defaultModel)
+                    android.util.Log.d("AIPreferences", "Set default model: $defaultModel")
+                }
+            }
         }
-        
-        agents.setProvider(providerId)
         refreshOpenRouterCustomModelVisibility()
         refreshOpenAICompatVisibility()
 
