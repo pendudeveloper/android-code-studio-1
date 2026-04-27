@@ -166,15 +166,27 @@ object BuildErrorAutoFixer {
     cyclesUsed += 1
 
     val manager = AIAgentManager(context)
+    val agents = com.tom.rv2ide.artificial.agents.Agents(context)
+    val preferred = agents.getProvider()
+
+    // ALWAYS honor the user's saved provider first. The manager's init may have
+    // already set an agent for a different provider (e.g. because Gemini had a
+    // key), but we must use what the user actually selected in the UI.
+    if (manager.getCurrentProviderId() != preferred) {
+      manager.setProvider(preferred)
+    }
+
     if (manager.getCurrentAgent() == null) {
-      val agents = com.tom.rv2ide.artificial.agents.Agents(context)
-      val preferred = agents.getProvider()
+      // User's selected provider has no valid key / couldn't initialize.
+      // Try a fallback chain rather than silently failing, but keep the user's
+      // pick at the top so it wins if it later becomes available.
       val candidates = buildList {
         add(preferred)
-        addAll(listOf("openrouter", "openai", "claude", "gemini", "deepseek", "grok"))
+        addAll(listOf("openaicompat", "openrouter", "openai", "claude", "gemini", "deepseek", "grok"))
       }.distinct()
       candidates.firstOrNull { manager.setProvider(it) }
     }
+
     if (manager.getCurrentAgent() == null) {
       Toast.makeText(context, R.string.ai_agent_autofix_unavailable, Toast.LENGTH_LONG).show()
       return

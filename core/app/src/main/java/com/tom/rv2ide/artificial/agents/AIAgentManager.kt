@@ -52,11 +52,23 @@ class AIAgentManager(private val context: Context) {
         LocalLLM.registerAgent()
         OpenRouter.registerAgent()
         com.tom.rv2ide.artificial.agents.openaicompat.OpenAICompat.registerAgent()
-        
+
         permissionManager.setFileWriteEnabled(true)
         permissionManager.setRequireConfirmation(false)
-        
-        setProvider(currentProviderId)
+
+        // Respect the user's saved provider preference instead of hard-coding
+        // "gemini". Fall back to gemini only if nothing is saved / available.
+        val savedProvider = Agents(context).getProvider()
+        currentProviderId = savedProvider
+        if (!setProvider(savedProvider)) {
+            // Saved choice unusable (no key, etc.). Leave currentAgent null so
+            // callers can decide what to do — do NOT silently reassign to a
+            // different provider here.
+            android.util.Log.w(
+                "AIAgentManager",
+                "Saved provider '$savedProvider' has no valid key; currentAgent=null",
+            )
+        }
     }
     
     fun getCurrentAgent(): AIAgent? = currentAgent
