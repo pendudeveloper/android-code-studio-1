@@ -25,3 +25,11 @@ class RateLimitException(message: String) : Exception(message)
 class QuotaExceededException(message: String) : Exception(message)
 class InsufficientBalanceException(message: String) : Exception(message)
 class InvalidApiKeyException(message: String) : Exception(message)
+
+/**
+ * Thrown when the upstream rejects the request because the prompt exceeds
+ * the model's context window. Distinct from a true account-level quota error
+ * — switching to a model with a larger context window (same provider) is the
+ * correct remedy and we should NOT switch providers for this.
+ */
+class ContextTooLongException(message: String) : Exception(message)

@@ -188,6 +188,13 @@ class ChatFragment(
             
             codeCompletionManager.clearSuggestion()
             aiRequestHandler.execute(userRequest)
+            // The attachment is consumed by the agent on the very next call;
+            // clear our chip so the user knows the image has been sent and
+            // won't be re-attached to the next, unrelated message.
+            if (com.tom.rv2ide.artificial.multimodal.ImageAttachment.hasPending()) {
+                com.tom.rv2ide.artificial.multimodal.ImageAttachment.clear()
+                refreshImageChip()
+            }
         }
     
         clearBtn.setOnClickListener {
@@ -202,7 +209,74 @@ class ChatFragment(
             launchVoiceInput()
         }
 
+        requireView().findViewById<MaterialButton>(R.id.imageAttachBtn)?.setOnClickListener {
+            launchImagePicker()
+        }
+
         wireTemplates()
+        refreshImageChip()
+    }
+
+    /**
+     * Launch a system image picker. The chosen image is downscaled, JPEG-encoded
+     * to base64, and stored on [com.tom.rv2ide.artificial.multimodal.ImageAttachment]
+     * so the next request goes out as a multimodal user message. We show a small
+     * chip near the prompt so the user knows an image is attached.
+     */
+    private fun launchImagePicker() {
+        val intent = android.content.Intent(android.content.Intent.ACTION_GET_CONTENT).apply {
+            type = "image/*"
+            addCategory(android.content.Intent.CATEGORY_OPENABLE)
+        }
+        try {
+            imagePickerLauncher.launch(intent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            showSnackbar("No image picker app available.")
+        }
+    }
+
+    private val imagePickerLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != android.app.Activity.RESULT_OK) return@registerForActivityResult
+        val uri = result.data?.data ?: return@registerForActivityResult
+        val ctx = context ?: return@registerForActivityResult
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val dataUrl = com.tom.rv2ide.artificial.multimodal.ImageAttachment
+                .encodeFromUri(ctx.contentResolver, uri)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (dataUrl == null) {
+                    showSnackbar("Could not read image. Try a different file.")
+                    return@withContext
+                }
+                val sizeKb = dataUrl.length / 1024
+                val label = "Image attached • ~${sizeKb}KB (b64)"
+                com.tom.rv2ide.artificial.multimodal.ImageAttachment.set(dataUrl, label)
+                refreshImageChip()
+                showSnackbar("Image attached. It'll be sent with your next message.")
+            }
+        }
+    }
+
+    /**
+     * Reflect the pending image attachment on the small chip below the input
+     * box. Tapping the chip clears the attachment.
+     */
+    private fun refreshImageChip() {
+        val v = view ?: return
+        val chip = v.findViewById<MaterialTextView>(R.id.imageAttachmentChip) ?: return
+        val pending = com.tom.rv2ide.artificial.multimodal.ImageAttachment.pendingLabel
+        if (pending == null) {
+            chip.visibility = View.GONE
+        } else {
+            chip.visibility = View.VISIBLE
+            chip.text = "🖼  $pending  ✕ tap to remove"
+            chip.setOnClickListener {
+                com.tom.rv2ide.artificial.multimodal.ImageAttachment.clear()
+                refreshImageChip()
+                showSnackbar("Image attachment removed")
+            }
+        }
     }
 
     /**

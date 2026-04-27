@@ -22,6 +22,7 @@ import com.tom.rv2ide.artificial.agents.AIAgent
 import com.tom.rv2ide.artificial.agents.AIAgentRegistry
 import com.tom.rv2ide.artificial.agents.Agents
 import com.tom.rv2ide.artificial.agents.ModificationAttempt
+import com.tom.rv2ide.artificial.exceptions.ContextTooLongException
 import com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException
 import com.tom.rv2ide.artificial.exceptions.QuotaExceededException
 import com.tom.rv2ide.artificial.exceptions.RateLimitException
@@ -82,6 +83,32 @@ class OpenRouter : AIAgent {
       "meta-llama/llama-3.1-70b-instruct:free",
       "mistralai/mistral-7b-instruct:free",
     )
+
+    /**
+     * Models with the largest context windows (free tier). Tried — in this
+     * order — when the upstream rejects the request because the prompt
+     * exceeds the active model's context window. The first entry has ~1M
+     * input tokens, the rest are 128k+ so a 50k-token prompt easily fits.
+     */
+    private val LARGE_CONTEXT_FALLBACK_MODELS = listOf(
+      "google/gemini-2.0-flash-exp:free",                 // ~1M tokens
+      "google/gemini-flash-1.5:free",                     // ~1M tokens
+      "meta-llama/llama-3.3-70b-instruct:free",           // 128k
+      "meta-llama/llama-3.1-70b-instruct:free",           // 128k
+      "qwen/qwen-2.5-coder-32b-instruct:free",            // 128k, code-tuned
+      "deepseek/deepseek-chat-v3.1:free",                 // 64k+
+    )
+
+    /** Heuristic — does this upstream error message describe a context window overflow? */
+    fun isContextTooLong(message: String): Boolean {
+      val m = message.lowercase()
+      return m.contains("context length") ||
+        m.contains("context window") ||
+        m.contains("maximum context") ||
+        (m.contains("tokens") && (m.contains("exceed") || m.contains("too many") || m.contains(">"))) ||
+        m.contains("prompt is too long") ||
+        m.contains("input is too long")
+    }
 
     fun registerAgent() {
       AIAgentRegistry.register(
@@ -261,6 +288,31 @@ class OpenRouter : AIAgent {
         return callOnce(apiKey, prompt, model)
       } catch (e: InvalidApiKeyException) {
         throw e // never fall back if the key is bad
+      } catch (e: ContextTooLongException) {
+        // Same provider, larger context window — try the big-context chain
+        // instead of failing up to AIAgentManager (which would otherwise
+        // switch to a different provider, which the user does not want).
+        lastError = e
+        android.util.Log.w(
+          "OpenRouter",
+          "Prompt exceeds context window on $model. Trying large-context models on the same provider.",
+        )
+        val bigChain = (LARGE_CONTEXT_FALLBACK_MODELS - model).distinct()
+        for (bigModel in bigChain) {
+          try {
+            return callOnce(apiKey, prompt, bigModel)
+          } catch (inner: ContextTooLongException) {
+            lastError = inner
+            android.util.Log.w("OpenRouter", "Still too long on $bigModel.")
+          } catch (inner: Throwable) {
+            lastError = inner
+            android.util.Log.w("OpenRouter", "Big-context fallback $bigModel failed: ${inner.message}")
+          }
+        }
+        // None of the large-context models worked — give up but stay on this
+        // provider; the manager treats ContextTooLongException as
+        // sticky-to-provider so it will not jump to another provider.
+        throw lastError as ContextTooLongException
       } catch (e: QuotaExceededException) {
         throw e // user must add credits — switching model won't help
       } catch (e: RateLimitException) {
@@ -292,7 +344,22 @@ class OpenRouter : AIAgent {
 
       val messages = JSONArray()
       messages.put(JSONObject().put("role", "system").put("content", writingRules.useThis()))
-      messages.put(JSONObject().put("role", "user").put("content", prompt))
+      val pendingImage = com.tom.rv2ide.artificial.multimodal.ImageAttachment.pendingDataUrl
+      if (pendingImage != null) {
+        // Multimodal user message — every modern OpenRouter vision model
+        // (gpt-4o*, gemini-*, claude-*, llama-3.2-*-vision, qwen-2-vl, etc.)
+        // accepts this exact shape.
+        val parts = JSONArray()
+          .put(JSONObject().put("type", "text").put("text", prompt))
+          .put(
+            JSONObject().put("type", "image_url").put(
+              "image_url", JSONObject().put("url", pendingImage),
+            ),
+          )
+        messages.put(JSONObject().put("role", "user").put("content", parts))
+      } else {
+        messages.put(JSONObject().put("role", "user").put("content", prompt))
+      }
 
       val requestBody = JSONObject()
         .put("model", model)
@@ -310,10 +377,24 @@ class OpenRouter : AIAgent {
           JSONObject(errorStream).optJSONObject("error")?.optString("message") ?: errorStream
         } catch (_: Exception) { errorStream }
 
+        // Some upstream providers report context-window overflow as 400 with
+        // a "tokens"/"context length" message — surface that as
+        // ContextTooLongException so callApi can switch to a bigger model
+        // *on the same provider* instead of failing the request up.
+        if (isContextTooLong(message)) {
+          throw ContextTooLongException("OpenRouter context overflow: $message")
+        }
         when {
           responseCode == 401 -> throw InvalidApiKeyException("Invalid OpenRouter API key: $message")
           responseCode == 402 -> throw QuotaExceededException("OpenRouter credit exhausted: $message")
-          responseCode == 429 -> throw RateLimitException("OpenRouter rate limit: $message")
+          responseCode == 429 -> {
+            // 429 with an explicit token-limit message is *also* a context
+            // overflow on free models — same fix as 400 above.
+            if (isContextTooLong(message)) {
+              throw ContextTooLongException("OpenRouter token limit: $message")
+            }
+            throw RateLimitException("OpenRouter rate limit: $message")
+          }
           else -> throw Exception("OpenRouter API error ($responseCode): $message")
         }
       }

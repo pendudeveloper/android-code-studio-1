@@ -154,6 +154,16 @@ class AIPreferencesFragment(
             com.tom.rv2ide.artificial.rules.WritingRules.planningModeEnabled = checked
             showSnackbar(if (checked) "Planning mode enabled" else "Planning mode disabled")
         }
+
+        val crossProviderToggle = view?.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.crossProviderFallbackToggle)
+        crossProviderToggle?.isChecked = sp.getBoolean("ai_agent_cross_provider_fallback_enabled", false)
+        crossProviderToggle?.setOnCheckedChangeListener { _, checked ->
+            sp.edit().putBoolean("ai_agent_cross_provider_fallback_enabled", checked).apply()
+            showSnackbar(
+                if (checked) "Cross-provider fallback enabled — will switch providers on quota / rate-limit errors"
+                else "Cross-provider fallback disabled — will stay on the active provider"
+            )
+        }
     }
 
     private fun setupOpenAICompat() {

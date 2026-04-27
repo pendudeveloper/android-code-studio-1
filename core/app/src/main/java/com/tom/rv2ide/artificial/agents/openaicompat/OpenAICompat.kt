@@ -232,7 +232,23 @@ class OpenAICompat : AIAgent {
 
       val messages = JSONArray()
       messages.put(JSONObject().put("role", "system").put("content", writingRules.useThis()))
-      messages.put(JSONObject().put("role", "user").put("content", prompt))
+      val pendingImage = com.tom.rv2ide.artificial.multimodal.ImageAttachment.pendingDataUrl
+      if (pendingImage != null) {
+        // Multimodal user message — works on any OpenAI-compat endpoint that
+        // supports vision (OpenAI gpt-4o, Together, Groq llama-3.2 vision,
+        // Fireworks, vLLM, Ollama llava etc.). Endpoints that don't support
+        // vision will return a clear 400 — much better than silently dropping.
+        val parts = JSONArray()
+          .put(JSONObject().put("type", "text").put("text", prompt))
+          .put(
+            JSONObject().put("type", "image_url").put(
+              "image_url", JSONObject().put("url", pendingImage),
+            ),
+          )
+        messages.put(JSONObject().put("role", "user").put("content", parts))
+      } else {
+        messages.put(JSONObject().put("role", "user").put("content", prompt))
+      }
 
       val requestBody = JSONObject()
         .put("model", resolvedModel)
@@ -250,6 +266,14 @@ class OpenAICompat : AIAgent {
         val message = try {
           JSONObject(errorStream).optJSONObject("error")?.optString("message") ?: errorStream
         } catch (_: Exception) { errorStream }
+        // Context-window overflow can be reported as 400 *or* 429 with a
+        // "tokens"/"context length" message; surface as ContextTooLongException
+        // so the manager keeps the user on this provider instead of switching.
+        if (com.tom.rv2ide.artificial.agents.openrouter.OpenRouter.isContextTooLong(message)) {
+          throw com.tom.rv2ide.artificial.exceptions.ContextTooLongException(
+            "$endpoint context overflow: $message"
+          )
+        }
         when (responseCode) {
           401 -> throw InvalidApiKeyException("Invalid API key for $endpoint: $message")
           402 -> throw QuotaExceededException("Quota exhausted at $endpoint: $message")

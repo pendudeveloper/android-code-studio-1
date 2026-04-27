@@ -285,26 +285,54 @@ class AIAgentManager(private val context: Context) {
                       android.util.Log.e("AIAgentManager", "Error occurred: ${error.message}", error)
                       lastError = error
 
-                      val shouldSwitchProvider = error is com.tom.rv2ide.artificial.exceptions.RateLimitException ||
-                                                error is com.tom.rv2ide.artificial.exceptions.QuotaExceededException ||
-                                                error is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException ||
-                                                error is com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException
-                      
-                      if (shouldSwitchProvider && !providerSwitched) {
+                      // ContextTooLongException is *not* an account-level
+                      // problem and must NOT switch providers — the agent
+                      // itself already cycled through every large-context
+                      // model on the current provider and gave up. Show a
+                      // clear message and stop.
+                      val isContextOverflow = error is com.tom.rv2ide.artificial.exceptions.ContextTooLongException
+
+                      val shouldSwitchProvider = !isContextOverflow && (
+                          error is com.tom.rv2ide.artificial.exceptions.RateLimitException ||
+                          error is com.tom.rv2ide.artificial.exceptions.QuotaExceededException ||
+                          error is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException ||
+                          error is com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException
+                      )
+
+                      // Cross-provider fallback is now gated behind an
+                      // explicit user opt-in. If the user switched to (say)
+                      // OpenRouter on purpose, we should NOT silently move
+                      // them to OpenAI-compat just because the upstream hit
+                      // a quota — the user wants to stay on the chosen
+                      // provider and resolve the issue themselves (e.g. by
+                      // picking another model).
+                      val crossProviderEnabled = try {
+                          android.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                              .getBoolean("ai_agent_cross_provider_fallback_enabled", false)
+                      } catch (_: Throwable) { false }
+
+                      if (isContextOverflow) {
+                          // The agent already exhausted its large-context
+                          // fallback chain — no point retrying on the same
+                          // model. Show the friendly explanation and stop.
+                          val errorDisplay = formatErrorMessage(error)
+                          callback.onError(errorDisplay)
+                          success = true
+                      } else if (shouldSwitchProvider && !providerSwitched) {
                           val currentProviderName = currentAgent?.providerName ?: "Unknown"
                           val errorMsg = error.message ?: "Unknown error"
-                          
-                          if (providerSwitchDialog.isAutoSwitchEnabled()) {
+
+                          if (crossProviderEnabled && providerSwitchDialog.isAutoSwitchEnabled()) {
                               val alternativeProvider = getAlternativeProvider()
                               if (alternativeProvider != null) {
                                   callback.onProcessing("⚠️ $currentProviderName: $errorMsg")
                                   callback.onProcessing("🔄 Auto-switching to another provider...")
                                   delay(1500)
-                                  
+
                                   if (setProvider(alternativeProvider)) {
                                       providerSwitched = true
                                       currentAgent?.resetAttemptCount()
-                                      
+
                                       val newProviderName = currentAgent?.providerName ?: "Unknown"
                                       callback.onProcessing("✅ Switched to $newProviderName")
                                   } else {
@@ -318,8 +346,12 @@ class AIAgentManager(private val context: Context) {
                                   success = true
                               }
                           } else {
+                              // Stay on the user's chosen provider. Surface
+                              // the upstream error verbatim so they can
+                              // decide what to do (add credits, change model,
+                              // wait out a rate limit, etc.).
                               val errorDisplay = formatErrorMessage(error)
-                              callback.onError("PROVIDER_SWITCH_REQUIRED::$errorDisplay")
+                              callback.onError(errorDisplay)
                               success = true
                           }
                       } else if ((currentAgent?.canRetry() == true) && !providerSwitched) {
@@ -478,6 +510,8 @@ class AIAgentManager(private val context: Context) {
         // Only show the exception type for unknown errors so they have a search
         // term, but never inline a 500-char dump in the chat bubble.
         return when (error) {
+            is com.tom.rv2ide.artificial.exceptions.ContextTooLongException ->
+                "📏 PROMPT TOO LONG\n\nProvider: $providerName\n\nThe model rejected the request because the prompt exceeds its context window. We already tried the largest free models on the same provider, none of them fit either.\n\nWhat to try:\n• Pick a paid model with a larger context window in Preferences → AI → Model\n• Reduce the conversation history (Clear chat)\n• Open fewer / smaller files in the project\n• Disable diff preview / streaming if you don't need them\n\nDetails: $errorMessage"
             is com.tom.rv2ide.artificial.exceptions.RateLimitException ->
                 "⚠️ RATE LIMIT EXCEEDED\n\nThe API rate limit has been exceeded.\nPlease wait a few minutes before trying again.\n\nDetails: $errorMessage"
             is com.tom.rv2ide.artificial.exceptions.QuotaExceededException ->
