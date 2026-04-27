@@ -1,6 +1,6 @@
 /*
  * This file is auto-generated.  DO NOT MODIFY.
- * Using: /data/data/com.termux/files/home/android-sdk/build-tools/35.0.0/aidl -p/data/data/com.termux/files/home/android-sdk/platforms/android-36/framework.aidl -o/data/data/com.termux/files/home/MinAndroidProjects/TomAndroidIDE/external/logwire/build/generated/aidl_source_output_dir/debug/out -I/data/data/com.termux/files/home/MinAndroidProjects/TomAndroidIDE/external/logwire/src/main/aidl -I/data/data/com.termux/files/home/MinAndroidProjects/TomAndroidIDE/external/logwire/src/debug/aidl -d/data/data/com.termux/files/usr/tmp/aidl18244700121018843233.d /data/data/com.termux/files/home/MinAndroidProjects/TomAndroidIDE/external/logwire/src/main/aidl/io/github/mohammedbaqernull/logger/ILogWireService.aidl
+ * Using: /home/ubuntu/android-sdk/build-tools/35.0.0/aidl -p/home/ubuntu/android-sdk/platforms/android-36/framework.aidl -o/home/ubuntu/repos/android-code-studio/external/logwire/build/generated/aidl_source_output_dir/debug/out -I/home/ubuntu/repos/android-code-studio/external/logwire/src/main/aidl -I/home/ubuntu/repos/android-code-studio/external/logwire/src/debug/aidl -d/tmp/aidl17552158678342217152.d /home/ubuntu/repos/android-code-studio/external/logwire/src/main/aidl/io/github/mohammedbaqernull/logger/ILogWireService.aidl
  */
 package io.github.mohammedbaqernull.logger;
 public interface ILogWireService extends android.os.IInterface

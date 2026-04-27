@@ -153,6 +153,7 @@ class AIAgentManager(private val context: Context) {
     suspend fun executeRequest(userRequest: String, callback: AIAgentCallback) {
         var success = false
         var providerSwitched = false
+        var lastError: Throwable? = null
 
         currentAgent?.resetAttemptCount()
         callback.onProcessing("Analyzing your request...")
@@ -233,7 +234,8 @@ class AIAgentManager(private val context: Context) {
                     },
                   onFailure = { error ->
                       android.util.Log.e("AIAgentManager", "Error occurred: ${error.message}", error)
-                      
+                      lastError = error
+
                       val shouldSwitchProvider = error is com.tom.rv2ide.artificial.exceptions.RateLimitException ||
                                                 error is com.tom.rv2ide.artificial.exceptions.QuotaExceededException ||
                                                 error is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException ||
@@ -287,7 +289,8 @@ class AIAgentManager(private val context: Context) {
                 )
             } catch (e: Exception) {
                 android.util.Log.e("AIAgentManager", "Exception occurred: ${e.message}", e)
-                
+                lastError = e
+
                 if (currentAgent?.canRetry() == true) {
                     callback.onRetry(
                         currentAgent?.getCurrentAttemptCount() ?: 0,
@@ -306,7 +309,21 @@ class AIAgentManager(private val context: Context) {
         if (!success) {
           val attemptCount = currentAgent?.getCurrentAttemptCount() ?: 0
           val agentName = currentAgent?.providerName ?: "No agent initialized"
-          callback.onError("Failed after $attemptCount attempts with $agentName.\n\nPlease check your API key and try again.")
+          val errDetails = lastError?.let { formatErrorMessage(it) }
+          val msg = buildString {
+            append("Failed after ")
+            append(attemptCount)
+            append(" attempts with ")
+            append(agentName)
+            append(".")
+            if (!errDetails.isNullOrBlank()) {
+              append("\n\nLast error:\n")
+              append(errDetails)
+            } else {
+              append("\n\nPlease check your API key and try again.")
+            }
+          }
+          callback.onError(msg)
           undoLastModification()
         }
     }
