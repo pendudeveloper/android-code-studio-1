@@ -24,6 +24,7 @@ import com.tom.rv2ide.artificial.agents.anthropic.Anthropic
 import com.tom.rv2ide.artificial.agents.grok.Grok
 import com.tom.rv2ide.artificial.agents.deepseek.DeepSeek
 import com.tom.rv2ide.artificial.agents.local.LocalLLM
+import com.tom.rv2ide.artificial.agents.openrouter.OpenRouter
 import com.tom.rv2ide.artificial.file.FileWriteResult
 import com.tom.rv2ide.artificial.parser.SnippetParser
 import com.tom.rv2ide.artificial.permissions.AIPermissionManager
@@ -42,6 +43,30 @@ class AIAgentManager(private val context: Context) {
     private var currentAgent: AIAgent? = null
     private val providerSwitchDialog = ProviderSwitchDialog(context)
 
+    /**
+     * Listener that re-initialises the agent when any AI-related preference
+     * changes (api keys, base url, model, provider). This avoids the
+     * "I just updated my key in settings but the chat still uses the old one
+     * until I restart the app" class of bug.
+     */
+    private val prefsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == null) return@OnSharedPreferenceChangeListener
+        val watched = AI_PREF_KEYS_PREFIXES.any { key.startsWith(it) } || key in AI_PREF_KEYS_EXACT
+        if (!watched) return@OnSharedPreferenceChangeListener
+        try {
+            val saved = Agents(context).getProvider()
+            if (saved == currentProviderId) {
+                // Same provider — reinit it so it picks up any model / base URL / key updates.
+                reinitializeWithSelectedModel()
+            } else {
+                // Provider switched out from under us. Try to honour the new pick.
+                setProvider(saved)
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w("AIAgentManager", "Reinit on prefs change failed: ${e.message}")
+        }
+    }
+
     init {
         Gemini.registerAgent()
         OpenAI.registerAgent()
@@ -49,14 +74,53 @@ class AIAgentManager(private val context: Context) {
         Grok.registerAgent()
         DeepSeek.registerAgent()
         LocalLLM.registerAgent()
-        
+        OpenRouter.registerAgent()
+        com.tom.rv2ide.artificial.agents.openaicompat.OpenAICompat.registerAgent()
+
         permissionManager.setFileWriteEnabled(true)
         permissionManager.setRequireConfirmation(false)
-        
-        setProvider(currentProviderId)
+
+        // Respect the user's saved provider preference instead of hard-coding
+        // "gemini". Fall back to gemini only if nothing is saved / available.
+        val savedProvider = Agents(context).getProvider()
+        currentProviderId = savedProvider
+        if (!setProvider(savedProvider)) {
+            // Saved choice unusable (no key, etc.). Leave currentAgent null so
+            // callers can decide what to do — do NOT silently reassign to a
+            // different provider here.
+            android.util.Log.w(
+                "AIAgentManager",
+                "Saved provider '$savedProvider' has no valid key; currentAgent=null",
+            )
+        }
+
+        try {
+            val sp = android.preference.PreferenceManager.getDefaultSharedPreferences(context)
+            sp.registerOnSharedPreferenceChangeListener(prefsListener)
+            // Re-hydrate in-memory WritingRules toggles so the agent picks them
+            // up even on first launch — before the user ever opens preferences.
+            com.tom.rv2ide.artificial.rules.WritingRules.planningModeEnabled =
+                sp.getBoolean("ai_agent_planning_mode_enabled", false)
+        } catch (e: Throwable) {
+            android.util.Log.w("AIAgentManager", "Could not register prefs listener: ${e.message}")
+        }
+    }
+
+    companion object {
+        private val AI_PREF_KEYS_PREFIXES = listOf(
+            "ai_agent_",          // ai_agent_*_api_key, ai_agent_openaicompat_*, ai_agent_model_name
+            "ai_provider",        // ai_provider_name
+        )
+        private val AI_PREF_KEYS_EXACT = setOf(
+            "ai_agent_streaming_enabled",
+            "ai_agent_diff_preview_enabled",
+        )
     }
     
     fun getCurrentAgent(): AIAgent? = currentAgent
+
+    /** Currently-loaded project root, or null if no project is open. */
+    fun getProjectRoot(): File? = currentProjectRoot
 
     fun setProvider(providerId: String): Boolean {
         android.util.Log.d("AIAgentManager", "setProvider called with: $providerId")
@@ -124,6 +188,10 @@ class AIAgentManager(private val context: Context) {
         currentAgent?.setProjectData(projectTree)
         permissionManager.addAllowedDirectory(projectRoot.absolutePath)
 
+        // Load any per-project AI notes (.aistudio/memory.md) so providers see them.
+        com.tom.rv2ide.artificial.rules.WritingRules.projectMemory =
+            com.tom.rv2ide.artificial.rules.ProjectMemory.read(projectRoot)
+
         return true
     }
 
@@ -134,6 +202,7 @@ class AIAgentManager(private val context: Context) {
     suspend fun executeRequest(userRequest: String, callback: AIAgentCallback) {
         var success = false
         var providerSwitched = false
+        var lastError: Throwable? = null
 
         currentAgent?.resetAttemptCount()
         callback.onProcessing("Analyzing your request...")
@@ -149,12 +218,27 @@ class AIAgentManager(private val context: Context) {
 
                 val previousFileStates = captureCurrentFileStates()
 
-                val result = currentAgent?.generateCode(
-                    prompt = userRequest,
-                    context = null,
-                    language = "kotlin",
-                    projectStructure = null
-                ) ?: Result.failure(Exception("No agent initialized"))
+                val streamingEnabled = run {
+                    val sp = android.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                    sp.getBoolean("ai_agent_streaming_enabled", true)
+                }
+
+                val result = if (streamingEnabled && currentAgent?.supportsStreaming() == true) {
+                    currentAgent?.generateCodeStreaming(
+                        prompt = userRequest,
+                        context = null,
+                        language = "kotlin",
+                        projectStructure = null,
+                        onChunk = { delta, full -> callback.onStreamChunk(delta, full) },
+                    ) ?: Result.failure(Exception("No agent initialized"))
+                } else {
+                    currentAgent?.generateCode(
+                        prompt = userRequest,
+                        context = null,
+                        language = "kotlin",
+                        projectStructure = null
+                    ) ?: Result.failure(Exception("No agent initialized"))
+                }
 
                 result.fold(
                     onSuccess = { response ->
@@ -199,27 +283,56 @@ class AIAgentManager(private val context: Context) {
                     },
                   onFailure = { error ->
                       android.util.Log.e("AIAgentManager", "Error occurred: ${error.message}", error)
-                      
-                      val shouldSwitchProvider = error is com.tom.rv2ide.artificial.exceptions.RateLimitException ||
-                                                error is com.tom.rv2ide.artificial.exceptions.QuotaExceededException ||
-                                                error is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException ||
-                                                error is com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException
-                      
-                      if (shouldSwitchProvider && !providerSwitched) {
+                      lastError = error
+
+                      // ContextTooLongException is *not* an account-level
+                      // problem and must NOT switch providers — the agent
+                      // itself already cycled through every large-context
+                      // model on the current provider and gave up. Show a
+                      // clear message and stop.
+                      val isContextOverflow = error is com.tom.rv2ide.artificial.exceptions.ContextTooLongException
+
+                      val shouldSwitchProvider = !isContextOverflow && (
+                          error is com.tom.rv2ide.artificial.exceptions.RateLimitException ||
+                          error is com.tom.rv2ide.artificial.exceptions.QuotaExceededException ||
+                          error is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException ||
+                          error is com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException
+                      )
+
+                      // Cross-provider fallback is now gated behind an
+                      // explicit user opt-in. If the user switched to (say)
+                      // OpenRouter on purpose, we should NOT silently move
+                      // them to OpenAI-compat just because the upstream hit
+                      // a quota — the user wants to stay on the chosen
+                      // provider and resolve the issue themselves (e.g. by
+                      // picking another model).
+                      val crossProviderEnabled = try {
+                          android.preference.PreferenceManager.getDefaultSharedPreferences(context)
+                              .getBoolean("ai_agent_cross_provider_fallback_enabled", false)
+                      } catch (_: Throwable) { false }
+
+                      if (isContextOverflow) {
+                          // The agent already exhausted its large-context
+                          // fallback chain — no point retrying on the same
+                          // model. Show the friendly explanation and stop.
+                          val errorDisplay = formatErrorMessage(error)
+                          callback.onError(errorDisplay)
+                          success = true
+                      } else if (shouldSwitchProvider && !providerSwitched) {
                           val currentProviderName = currentAgent?.providerName ?: "Unknown"
                           val errorMsg = error.message ?: "Unknown error"
-                          
-                          if (providerSwitchDialog.isAutoSwitchEnabled()) {
+
+                          if (crossProviderEnabled && providerSwitchDialog.isAutoSwitchEnabled()) {
                               val alternativeProvider = getAlternativeProvider()
                               if (alternativeProvider != null) {
                                   callback.onProcessing("⚠️ $currentProviderName: $errorMsg")
                                   callback.onProcessing("🔄 Auto-switching to another provider...")
                                   delay(1500)
-                                  
+
                                   if (setProvider(alternativeProvider)) {
                                       providerSwitched = true
                                       currentAgent?.resetAttemptCount()
-                                      
+
                                       val newProviderName = currentAgent?.providerName ?: "Unknown"
                                       callback.onProcessing("✅ Switched to $newProviderName")
                                   } else {
@@ -233,8 +346,12 @@ class AIAgentManager(private val context: Context) {
                                   success = true
                               }
                           } else {
+                              // Stay on the user's chosen provider. Surface
+                              // the upstream error verbatim so they can
+                              // decide what to do (add credits, change model,
+                              // wait out a rate limit, etc.).
                               val errorDisplay = formatErrorMessage(error)
-                              callback.onError("PROVIDER_SWITCH_REQUIRED::$errorDisplay")
+                              callback.onError(errorDisplay)
                               success = true
                           }
                       } else if ((currentAgent?.canRetry() == true) && !providerSwitched) {
@@ -253,7 +370,8 @@ class AIAgentManager(private val context: Context) {
                 )
             } catch (e: Exception) {
                 android.util.Log.e("AIAgentManager", "Exception occurred: ${e.message}", e)
-                
+                lastError = e
+
                 if (currentAgent?.canRetry() == true) {
                     callback.onRetry(
                         currentAgent?.getCurrentAttemptCount() ?: 0,
@@ -272,7 +390,21 @@ class AIAgentManager(private val context: Context) {
         if (!success) {
           val attemptCount = currentAgent?.getCurrentAttemptCount() ?: 0
           val agentName = currentAgent?.providerName ?: "No agent initialized"
-          callback.onError("Failed after $attemptCount attempts with $agentName.\n\nPlease check your API key and try again.")
+          val errDetails = lastError?.let { formatErrorMessage(it) }
+          val msg = buildString {
+            append("Failed after ")
+            append(attemptCount)
+            append(" attempts with ")
+            append(agentName)
+            append(".")
+            if (!errDetails.isNullOrBlank()) {
+              append("\n\nLast error:\n")
+              append(errDetails)
+            } else {
+              append("\n\nPlease check your API key and try again.")
+            }
+          }
+          callback.onError(msg)
           undoLastModification()
         }
     }
@@ -306,13 +438,23 @@ class AIAgentManager(private val context: Context) {
                         val cleanedContent = parser.cleanFileContent(rawContent)
                         val previousContent = previousFileStates[currentFile]
 
-                        val writeResult = currentAgent?.writeFile(currentFile, cleanedContent)
-                            ?: FileWriteResult.Error("No agent initialized")
+                        val approved = callback.confirmFileChange(
+                            currentFile, previousContent, cleanedContent,
+                        )
+                        val writeResult = if (!approved) {
+                            FileWriteResult.Error("Skipped by user via diff preview")
+                        } else {
+                            currentAgent?.writeFile(currentFile, cleanedContent)
+                                ?: FileWriteResult.Error("No agent initialized")
+                        }
 
                         val success = writeResult is FileWriteResult.Success
                         currentAgent?.recordModification(currentFile, previousContent, cleanedContent, success)
 
                         callback.onFileModified(currentFile, fileName, success)
+                        try {
+                            callback.onFileDiff(currentFile, fileName, previousContent, cleanedContent, success)
+                        } catch (_: Throwable) { /* never break modification flow on UI error */ }
                         delay(300)
 
                         modifications.add(BaseFileModification(currentFile, cleanedContent, writeResult))
@@ -334,13 +476,23 @@ class AIAgentManager(private val context: Context) {
                 val cleanedContent = parser.cleanFileContent(rawContent)
                 val previousContent = previousFileStates[currentFile]
 
-                val writeResult = currentAgent?.writeFile(currentFile, cleanedContent)
-                    ?: FileWriteResult.Error("No agent initialized")
+                val approved = callback.confirmFileChange(
+                    currentFile, previousContent, cleanedContent,
+                )
+                val writeResult = if (!approved) {
+                    FileWriteResult.Error("Skipped by user via diff preview")
+                } else {
+                    currentAgent?.writeFile(currentFile, cleanedContent)
+                        ?: FileWriteResult.Error("No agent initialized")
+                }
 
                 val success = writeResult is FileWriteResult.Success
                 currentAgent?.recordModification(currentFile, previousContent, cleanedContent, success)
 
                 callback.onFileModified(currentFile, fileName, success)
+                try {
+                    callback.onFileDiff(currentFile, fileName, previousContent, cleanedContent, success)
+                } catch (_: Throwable) { /* never break modification flow on UI error */ }
                 delay(300)
 
                 modifications.add(BaseFileModification(currentFile, cleanedContent, writeResult))
@@ -352,26 +504,30 @@ class AIAgentManager(private val context: Context) {
 
     private fun formatErrorMessage(error: Throwable): String {
         val errorMessage = error.message ?: "Unknown error occurred"
-        val stackTrace = error.stackTraceToString().take(500)
         val providerName = currentAgent?.providerName ?: "Unknown"
-        
+
+        // Keep the user-facing error short — full stack trace stays in logcat.
+        // Only show the exception type for unknown errors so they have a search
+        // term, but never inline a 500-char dump in the chat bubble.
         return when (error) {
-            is com.tom.rv2ide.artificial.exceptions.RateLimitException -> 
+            is com.tom.rv2ide.artificial.exceptions.ContextTooLongException ->
+                "📏 PROMPT TOO LONG\n\nProvider: $providerName\n\nThe model rejected the request because the prompt exceeds its context window. We already tried the largest free models on the same provider, none of them fit either.\n\nWhat to try:\n• Pick a paid model with a larger context window in Preferences → AI → Model\n• Reduce the conversation history (Clear chat)\n• Open fewer / smaller files in the project\n• Disable diff preview / streaming if you don't need them\n\nDetails: $errorMessage"
+            is com.tom.rv2ide.artificial.exceptions.RateLimitException ->
                 "⚠️ RATE LIMIT EXCEEDED\n\nThe API rate limit has been exceeded.\nPlease wait a few minutes before trying again.\n\nDetails: $errorMessage"
-            is com.tom.rv2ide.artificial.exceptions.QuotaExceededException -> 
+            is com.tom.rv2ide.artificial.exceptions.QuotaExceededException ->
                 "⚠️ QUOTA EXCEEDED\n\nYour API quota has been exhausted.\nPlease check your billing or upgrade your plan.\n\nDetails: $errorMessage"
-            is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException -> 
-                "💳 INSUFFICIENT BALANCE\n\nYour account balance is too low to process this request.\nPlease add credits or upgrade your plan.\n\nProvider: $providerName\n\nDetails: $errorMessage"
-            is com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException -> 
-                "❌ INVALID API KEY\n\nThe API key is invalid or expired.\nPlease update your API key in the configuration.\n\nDetails: $errorMessage"
+            is com.tom.rv2ide.artificial.exceptions.InsufficientBalanceException ->
+                "💳 INSUFFICIENT BALANCE\n\nProvider: $providerName\nYour account balance is too low to process this request.\n\nDetails: $errorMessage"
+            is com.tom.rv2ide.artificial.exceptions.InvalidApiKeyException ->
+                "❌ INVALID API KEY\n\nThe API key is invalid or expired.\nPlease update it in Preferences → AI.\n\nDetails: $errorMessage"
             is java.net.UnknownHostException ->
-                "🌐 NETWORK ERROR\n\nCould not connect to the API server.\nPlease check your internet connection.\n\nDetails: $errorMessage"
+                "🌐 NETWORK ERROR\n\nCould not reach the API server. Check your internet connection.\n\nDetails: $errorMessage"
             is java.net.SocketTimeoutException ->
-                "⏱️ TIMEOUT ERROR\n\nThe request took too long to complete.\nPlease try again.\n\nDetails: $errorMessage"
+                "⏱️ TIMEOUT ERROR\n\nThe request took too long to complete.\nProvider may be slow — try a faster model.\n\nDetails: $errorMessage"
             is org.json.JSONException ->
-                "📄 JSON PARSING ERROR\n\nFailed to parse API response.\nThe API may be experiencing issues.\n\nDetails: $errorMessage"
-            else -> 
-                "❌ ERROR OCCURRED\n\nProvider: $providerName\nError Type: ${error.javaClass.simpleName}\n\nMessage: $errorMessage\n\nStack Trace (first 500 chars):\n$stackTrace"
+                "📄 RESPONSE PARSE ERROR\n\nThe upstream returned a body we couldn't read as JSON.\n\nDetails: $errorMessage"
+            else ->
+                "❌ ERROR\n\nProvider: $providerName\nType: ${error.javaClass.simpleName}\nMessage: $errorMessage"
         }
     }
 
@@ -507,6 +663,38 @@ class AIAgentManager(private val context: Context) {
         fun onTextResponse(response: String, summary: ModificationSummary)
         fun onError(message: String)
         fun onRetry(attemptNumber: Int, message: String)
+        /**
+         * Streaming providers push partial deltas as they arrive. Default
+         * implementation is a no-op so existing callbacks keep working without
+         * changes.
+         */
+        fun onStreamChunk(delta: String, fullSoFar: String) {}
+
+        /**
+         * Optional confirmation hook. The manager calls this before writing
+         * a file when diff-preview mode is on. Returning `false` will skip
+         * the write and mark the modification as failed. Default returns
+         * `true` (no confirmation) for backwards compatibility. This call
+         * is made on the IO dispatcher and may block on user interaction.
+         */
+        suspend fun confirmFileChange(
+            filePath: String,
+            previousContent: String?,
+            newContent: String,
+        ): Boolean = true
+
+        /**
+         * Fired right after a file has been written so live UIs can render a
+         * unified diff (red `-` / green `+`) of the change. [previousContent]
+         * is null when the file did not exist before. Default no-op.
+         */
+        fun onFileDiff(
+            filePath: String,
+            fileName: String,
+            previousContent: String?,
+            newContent: String,
+            success: Boolean,
+        ) {}
     }
 
     data class ModificationResult(

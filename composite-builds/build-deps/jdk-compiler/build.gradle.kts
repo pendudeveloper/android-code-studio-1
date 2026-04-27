@@ -25,6 +25,20 @@ java {
   targetCompatibility = JavaVersion.VERSION_1_8
 }
 
+// The vendored OpenJDK source ships an incomplete `sjavac` package (the server-side
+// classes ServerMain/SjavacServer/PortFile/CompilationSubResult/SysInfo/Sjavac were
+// not imported into this fork). The Android IDE never invokes those code paths, so
+// we simply exclude the entire sjavac tree from compilation. The only non-sjavac
+// reference is a Class.getName() string comparison in ClassFinder.java, which keeps
+// working at runtime regardless of whether the class exists.
+sourceSets {
+  main {
+    java {
+      exclude("openjdk/tools/sjavac/**")
+    }
+  }
+}
+
 dependencies {
   api(projects.buildDeps.javaCompiler)
 }

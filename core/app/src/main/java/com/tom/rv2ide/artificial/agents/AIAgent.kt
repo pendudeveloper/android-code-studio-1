@@ -41,7 +41,29 @@ interface AIAgent {
         language: String,
         projectStructure: String?
     ): Result<String>
-    
+
+    /**
+     * Streaming variant. Implementations that support server-sent events should
+     * push every incremental delta through [onChunk] as it arrives, and return
+     * the full assembled response. The default implementation falls back to the
+     * non-streaming [generateCode] (and emits the entire response as a single
+     * chunk) so existing providers continue to work unchanged.
+     */
+    suspend fun generateCodeStreaming(
+        prompt: String,
+        context: String?,
+        language: String,
+        projectStructure: String?,
+        onChunk: (delta: String, full: String) -> Unit
+    ): Result<String> {
+        val result = generateCode(prompt, context, language, projectStructure)
+        result.getOrNull()?.let { onChunk(it, it) }
+        return result
+    }
+
+    /** Whether this provider supports true streaming (SSE) deltas. */
+    fun supportsStreaming(): Boolean = false
+
     fun recordModification(filePath: String, oldContent: String?, newContent: String, success: Boolean)
     fun undoLastModification(): Boolean
     fun getModificationHistory(): List<ModificationAttempt>

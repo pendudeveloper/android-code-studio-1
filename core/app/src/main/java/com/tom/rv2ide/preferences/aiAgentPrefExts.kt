@@ -51,6 +51,10 @@ private class AIAgentConfig(
   @IgnoredOnParcel private var openAIApiKeyPref: OpenAIApiKey? = null
   @IgnoredOnParcel private var anthropicApiKeyPref: AnthropicApiKey? = null
   @IgnoredOnParcel private var grokApiKeyPref: GrokApiKey? = null
+  @IgnoredOnParcel private var openRouterApiKeyPref: OpenRouterApiKey? = null
+  @IgnoredOnParcel private var openRouterModelPref: OpenRouterCustomModel? = null
+  @IgnoredOnParcel private var autoFixBuildPref: AutoFixBuildErrors? = null
+  @IgnoredOnParcel private var autoFixLoopPref: AutoFixBuildLoop? = null
 
   init {
     val aiAgentEnabled = AIAgentEnabled { isEnabled -> updateApiKeyPreferencesState(isEnabled) }
@@ -60,6 +64,10 @@ private class AIAgentConfig(
     openAIApiKeyPref = OpenAIApiKey()
     anthropicApiKeyPref = AnthropicApiKey()
     grokApiKeyPref = GrokApiKey()
+    openRouterApiKeyPref = OpenRouterApiKey()
+    openRouterModelPref = OpenRouterCustomModel()
+    autoFixBuildPref = AutoFixBuildErrors()
+    autoFixLoopPref = AutoFixBuildLoop()
 
     addPreference(aiAgentEnabled)
     addPreference(geminiApiKeyPref!!)
@@ -67,6 +75,10 @@ private class AIAgentConfig(
     addPreference(openAIApiKeyPref!!)
     addPreference(anthropicApiKeyPref!!)
     addPreference(grokApiKeyPref!!)
+    addPreference(openRouterApiKeyPref!!)
+    addPreference(openRouterModelPref!!)
+    addPreference(autoFixBuildPref!!)
+    addPreference(autoFixLoopPref!!)
   }
 
   private fun updateApiKeyPreferencesState(isEnabled: Boolean) {
@@ -75,6 +87,10 @@ private class AIAgentConfig(
     openAIApiKeyPref?.setEnabled(isEnabled)
     anthropicApiKeyPref?.setEnabled(isEnabled)
     grokApiKeyPref?.setEnabled(isEnabled)
+    openRouterApiKeyPref?.setEnabled(isEnabled)
+    openRouterModelPref?.setEnabled(isEnabled)
+    autoFixBuildPref?.setEnabled(isEnabled)
+    autoFixLoopPref?.setEnabled(isEnabled)
   }
 }
 
@@ -370,5 +386,175 @@ private class AnthropicApiKey(
   private fun getSummaryText(): String {
     val apiKey = prefManager.getString("ai_agent_anthropic_api_key", "")
     return if (apiKey.isBlank()) "Click to set API key" else "API Key: ${apiKey.take(8)}..."
+  }
+}
+
+@Parcelize
+private class OpenRouterApiKey(
+    override val key: String = "ai_agent_openrouter_api_key",
+    override val title: Int = R.string.ai_agent_openrouter_api_key,
+) : BasePreference() {
+
+  @IgnoredOnParcel private var preference: Preference? = null
+
+  override fun onCreatePreference(context: Context): Preference {
+    preference =
+        androidx.preference.Preference(context).apply {
+          key = "ai_agent_openrouter_api_key"
+          title = context.getString(R.string.ai_agent_openrouter_api_key)
+          summary = getSummaryText(context)
+          isEnabled = prefManager.getBoolean("ai_agent_enabled", false)
+        }
+    return preference!!
+  }
+
+  override fun onPreferenceClick(preference: Preference): Boolean {
+    val context = preference.context
+    val editText = android.widget.EditText(context)
+    editText.setText(prefManager.getString("ai_agent_openrouter_api_key", ""))
+    editText.hint = "Enter your OpenRouter API key (sk-or-...)"
+
+    com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
+        .setTitle(R.string.ai_agent_openrouter_api_key_dialog_title)
+        .setMessage(R.string.ai_agent_openrouter_api_key_summary)
+        .setView(editText)
+        .setPositiveButton("Save") { _, _ ->
+          val apiKey = editText.text.toString().trim()
+          prefManager.putString("ai_agent_openrouter_api_key", apiKey)
+          preference.summary = getSummaryText(context)
+        }
+        .setNegativeButton("Cancel", null)
+        .show()
+    return true
+  }
+
+  fun setEnabled(enabled: Boolean) {
+    preference?.isEnabled = enabled
+  }
+
+  private fun getSummaryText(context: Context): String {
+    val apiKey = prefManager.getString("ai_agent_openrouter_api_key", "")
+    return if (apiKey.isBlank()) {
+      context.getString(R.string.ai_agent_openrouter_api_key_summary)
+    } else {
+      "API Key: ${apiKey.take(8)}..."
+    }
+  }
+}
+
+@Parcelize
+private class OpenRouterCustomModel(
+    override val key: String = "ai_agent_openrouter_custom_model",
+    override val title: Int = R.string.ai_agent_openrouter_custom_model,
+) : BasePreference() {
+
+  @IgnoredOnParcel private var preference: Preference? = null
+
+  override fun onCreatePreference(context: Context): Preference {
+    preference =
+        androidx.preference.Preference(context).apply {
+          key = "ai_agent_openrouter_custom_model"
+          title = context.getString(R.string.ai_agent_openrouter_custom_model)
+          summary = getSummaryText(context)
+          isEnabled = prefManager.getBoolean("ai_agent_enabled", false)
+        }
+    return preference!!
+  }
+
+  override fun onPreferenceClick(preference: Preference): Boolean {
+    val context = preference.context
+    val editText = android.widget.EditText(context)
+    editText.setText(prefManager.getString("ai_agent_openrouter_custom_model", ""))
+    editText.hint = "e.g. openai/gpt-4o-mini"
+
+    com.google.android.material.dialog.MaterialAlertDialogBuilder(context)
+        .setTitle(R.string.ai_agent_openrouter_custom_model_dialog_title)
+        .setMessage(R.string.ai_agent_openrouter_custom_model_summary)
+        .setView(editText)
+        .setPositiveButton("Save") { _, _ ->
+          val model = editText.text.toString().trim()
+          prefManager.putString("ai_agent_openrouter_custom_model", model)
+          preference.summary = getSummaryText(context)
+          android.widget.Toast.makeText(
+            context,
+            if (model.isBlank()) "Custom OpenRouter model cleared"
+            else "Saved OpenRouter model: $model",
+            android.widget.Toast.LENGTH_SHORT
+          ).show()
+        }
+        .setNeutralButton("Clear") { _, _ ->
+          prefManager.putString("ai_agent_openrouter_custom_model", "")
+          preference.summary = getSummaryText(context)
+        }
+        .setNegativeButton("Cancel", null)
+        .show()
+    return true
+  }
+
+  fun setEnabled(enabled: Boolean) {
+    preference?.isEnabled = enabled
+  }
+
+  private fun getSummaryText(context: Context): String {
+    val model = prefManager.getString("ai_agent_openrouter_custom_model", "")
+    return if (model.isBlank()) {
+      context.getString(R.string.ai_agent_openrouter_custom_model_summary)
+    } else {
+      "Custom model: $model"
+    }
+  }
+}
+
+@Parcelize
+private class AutoFixBuildErrors(
+    override val key: String = "ai_agent_autofix_build",
+    override val title: Int = R.string.ai_agent_autofix_build,
+) : SwitchPreference(
+    setValue = { value -> prefManager.putBoolean("ai_agent_autofix_build", value) },
+    getValue = { prefManager.getBoolean("ai_agent_autofix_build", true) },
+) {
+
+  @IgnoredOnParcel private var preference: Preference? = null
+
+  override fun onCreatePreference(context: Context): Preference {
+    val pref = super.onCreatePreference(context).apply {
+      key = "ai_agent_autofix_build"
+      title = context.getString(R.string.ai_agent_autofix_build)
+      summary = context.getString(R.string.ai_agent_autofix_build_summary)
+      isEnabled = prefManager.getBoolean("ai_agent_enabled", false)
+    }
+    preference = pref
+    return pref
+  }
+
+  fun setEnabled(enabled: Boolean) {
+    preference?.isEnabled = enabled
+  }
+}
+
+@Parcelize
+private class AutoFixBuildLoop(
+    override val key: String = "ai_agent_autofix_loop",
+    override val title: Int = R.string.ai_agent_autofix_loop,
+) : SwitchPreference(
+    setValue = { value -> prefManager.putBoolean("ai_agent_autofix_loop", value) },
+    getValue = { prefManager.getBoolean("ai_agent_autofix_loop", false) },
+) {
+
+  @IgnoredOnParcel private var preference: Preference? = null
+
+  override fun onCreatePreference(context: Context): Preference {
+    val pref = super.onCreatePreference(context).apply {
+      key = "ai_agent_autofix_loop"
+      title = context.getString(R.string.ai_agent_autofix_loop)
+      summary = context.getString(R.string.ai_agent_autofix_loop_summary)
+      isEnabled = prefManager.getBoolean("ai_agent_enabled", false)
+    }
+    preference = pref
+    return pref
+  }
+
+  fun setEnabled(enabled: Boolean) {
+    preference?.isEnabled = enabled
   }
 }

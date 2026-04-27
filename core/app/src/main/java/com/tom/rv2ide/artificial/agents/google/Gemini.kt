@@ -280,6 +280,11 @@ class Gemini : AIAgent {
 
           conversationHistory.add(ConversationMessage("user", prompt))
           conversationHistory.add(ConversationMessage("assistant", generatedResponse))
+          // Cap conversation history to prevent unbounded RAM growth.
+          while (conversationHistory.size > 20) {
+            conversationHistory.removeAt(0)
+          }
+
 
           if (conversationHistory.size > 20) {
             conversationHistory.removeAt(0)

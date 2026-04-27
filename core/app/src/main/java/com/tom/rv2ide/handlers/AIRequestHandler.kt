@@ -1,6 +1,10 @@
 package com.tom.rv2ide.handlers
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.view.View
+import android.widget.Toast
 import androidx.lifecycle.LifecycleCoroutineScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.progressindicator.CircularProgressIndicator
@@ -9,6 +13,9 @@ import androidx.recyclerview.widget.RecyclerView
 import android.widget.LinearLayout
 import com.tom.rv2ide.adapters.FileModificationAdapter
 import com.tom.rv2ide.artificial.agents.AIAgentManager
+import com.tom.rv2ide.artificial.text.MarkdownRenderer
+import com.tom.rv2ide.artificial.usage.SessionLog
+import com.tom.rv2ide.artificial.usage.UsageTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -44,9 +51,53 @@ class AIRequestHandler(
                     fileModificationAdapter.clear()
                     fileModificationList.visibility = View.GONE
                 }
-                
-                executeAIRequest(userRequest)
-                
+
+                SessionLog.add(SessionLog.Entry("user", userRequest))
+
+                // Surface obvious offline state up front so the user doesn't sit
+                // through a 30 s watchdog when they're on airplane mode.
+                if (!com.tom.rv2ide.artificial.safety.PromptSafety.isOnline(executeBtn.context)) {
+                    withContext(Dispatchers.Main) {
+                        executeBtn.isEnabled = true
+                        progressIndicator.visibility = View.GONE
+                        statusText.text = "🌐 No internet connection. Check Wi-Fi / mobile data and try again."
+                    }
+                    return@launch
+                }
+
+                // Warn the user once if their prompt visibly contains a secret —
+                // they may have pasted a key or token by mistake. The request is
+                // still sent (we can't fully redact reliably), but the warning
+                // gives them a chance to abort.
+                val secrets = com.tom.rv2ide.artificial.safety.PromptSafety.findSecrets(userRequest)
+                if (secrets.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        statusText.text = "⚠️ Possible secret detected in prompt (${secrets.size}). Sending anyway."
+                    }
+                }
+
+                // Expand any `@filename` mentions into attached file context so the
+                // model sees the actual contents of the files the user is asking
+                // about, rather than relying on its own guess.
+                val expanded = com.tom.rv2ide.artificial.text.MentionResolver.resolve(
+                    userRequest,
+                    aiAgent.getProjectRoot(),
+                )
+                if (expanded.resolved.isNotEmpty() || expanded.unresolved.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        val pieces = mutableListOf<String>()
+                        if (expanded.resolved.isNotEmpty()) {
+                            pieces += "Attached: " + expanded.resolved.joinToString(", ")
+                        }
+                        if (expanded.unresolved.isNotEmpty()) {
+                            pieces += "Could not find: " + expanded.unresolved.joinToString(", ")
+                        }
+                        statusText.text = pieces.joinToString("\n")
+                    }
+                }
+
+                executeAIRequest(expanded.expandedPrompt)
+
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     executeBtn.isEnabled = true
@@ -114,6 +165,39 @@ class AIRequestHandler(
                     statusText.text = "🔄 Retry #$attemptNumber: $message"
                 }
             }
+
+            override fun onStreamChunk(delta: String, fullSoFar: String) {
+                // Coalesce updates on the main thread; the SSE callback fires
+                // dozens of times per second, so we just push the latest text
+                // and let the rendering cost stay sublinear.
+                lifecycleScope.launch(Dispatchers.Main) {
+                    summaryCard.visibility = View.VISIBLE
+                    val truncated = if (fullSoFar.length > 8000)
+                        "…" + fullSoFar.takeLast(8000) else fullSoFar
+                    summaryText.text = truncated
+                    statusText.text = "💬 Streaming…"
+                }
+            }
+
+            override suspend fun confirmFileChange(
+                filePath: String,
+                previousContent: String?,
+                newContent: String,
+            ): Boolean {
+                val ctx = statusText.context
+                val sp = android.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
+                val enabled = sp.getBoolean("ai_agent_diff_preview_enabled", false)
+                if (!enabled) return true
+                return try {
+                    com.tom.rv2ide.artificial.diff.DiffPreviewDialog.confirm(
+                        ctx, filePath, previousContent, newContent,
+                    )
+                } catch (_: Exception) {
+                    // If the dialog can't show (e.g., context not an Activity),
+                    // fall back to writing.
+                    true
+                }
+            }
         })
     }
     
@@ -124,6 +208,7 @@ class AIRequestHandler(
     ) {
         progressIndicator.visibility = View.GONE
         statusText.text = "✅ Operation completed"
+        SessionLog.add(SessionLog.Entry("assistant", response, model = UsageTracker.last?.model))
         summaryText.text = buildSummaryText(summary)
         summaryCard.visibility = View.VISIBLE
         
@@ -141,7 +226,15 @@ class AIRequestHandler(
     private fun handleTextResponse(response: String) {
         progressIndicator.visibility = View.GONE
         executeBtn.isEnabled = true
-        statusText.text = response
+        SessionLog.add(SessionLog.Entry("assistant", response, model = UsageTracker.last?.model))
+        statusText.text = MarkdownRenderer.render(response)
+        statusText.setOnLongClickListener {
+            val ctx = statusText.context
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("AI response", response))
+            Toast.makeText(ctx, "Copied AI response", Toast.LENGTH_SHORT).show()
+            true
+        }
         summaryCard.visibility = View.GONE
         fileModificationList.visibility = View.GONE
     }
@@ -167,7 +260,13 @@ Please check the error message and try again.
             builder.append("❌ Failed: ${summary.failedFiles}\n")
         }
         builder.append("🆕 New Files: ${summary.newFiles}\n")
-        builder.append("✏️ Modified Files: ${summary.modifiedFiles}\n\n")
+        builder.append("✏️ Modified Files: ${summary.modifiedFiles}\n")
+
+        UsageTracker.last?.let { usage ->
+            builder.append("🔢 Tokens: ${usage.promptTokens} in / ${usage.completionTokens} out")
+                .append("  •  session total: ${UsageTracker.totalTokens()}\n")
+        }
+        builder.append('\n')
         
         builder.append("Files:\n")
         summary.fileDetails.forEach { detail ->

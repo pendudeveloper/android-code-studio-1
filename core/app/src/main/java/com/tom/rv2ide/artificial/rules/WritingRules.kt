@@ -23,8 +23,41 @@ package com.tom.rv2ide.artificial.rules
 
 // TODO: allow user to write rules in the sidebar
 object WritingRules {
+
+    /** Project-specific notes shared across all providers; updated by AIAgentManager. */
+    @Volatile
+    var projectMemory: String? = null
+
+    /** When true, append a 'think-then-plan-then-code' directive to the system prompt. */
+    @Volatile
+    var planningModeEnabled: Boolean = false
+
     class Instructions {
-        fun useThis(): String = """
+        fun useThis(): String {
+            val base = baseRules()
+            val pieces = mutableListOf(base)
+            if (planningModeEnabled) {
+                pieces += """
+        [ PLANNING MODE — requested by user ]
+        Before writing any code or FILE_TO_MODIFY blocks, output a short plan:
+        1. What files will you touch (list them with a one-line reason each)?
+        2. What's the step-by-step ordering?
+        3. What could go wrong (compile errors, missing deps, required permissions)?
+        Then, below that plan, produce the actual code / modifications.
+        Keep the plan concise — no more than 8 numbered steps.
+                """.trimIndent()
+            }
+            val mem = projectMemory?.takeIf { it.isNotBlank() }
+            if (mem != null) {
+                pieces += """
+        [ PROJECT MEMORY — user-maintained notes ]
+        $mem
+                """.trimIndent()
+            }
+            return pieces.joinToString("\n\n")
+        }
+
+        private fun baseRules(): String = """
         You are an Android Software Engineer named "ACS AI Agent" remember your name and professional at coding.
         Read below rules carefully:
         
