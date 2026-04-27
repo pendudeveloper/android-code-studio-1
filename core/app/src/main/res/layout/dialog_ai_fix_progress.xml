@@ -172,6 +172,24 @@
             android:nestedScrollingEnabled="false"
             android:layout_marginBottom="12dp" />
 
+        <!-- Diff cards (per-file +/- view) -->
+        <com.google.android.material.textview.MaterialTextView
+            android:id="@+id/aiFixDiffsHeader"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Proposed changes (diff)"
+            android:textColor="?attr/colorPrimary"
+            android:textAppearance="?attr/textAppearanceTitleSmall"
+            android:visibility="gone"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:id="@+id/aiFixDiffContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="12dp" />
+
         <!-- AI reply (live streaming) -->
         <com.google.android.material.textview.MaterialTextView
             android:layout_width="wrap_content"

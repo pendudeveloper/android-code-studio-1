@@ -54,6 +54,8 @@ class AIFixLiveProgress(private val context: Context) {
   private val fileList: RecyclerView = view.findViewById(R.id.aiFixFileList)
   private val replyText: MaterialTextView = view.findViewById(R.id.aiFixReply)
   private val logText: MaterialTextView = view.findViewById(R.id.aiFixLog)
+  private val diffsHeader: MaterialTextView = view.findViewById(R.id.aiFixDiffsHeader)
+  private val diffContainer: android.widget.LinearLayout = view.findViewById(R.id.aiFixDiffContainer)
 
   private val adapter = FileModificationAdapter()
   private val logBuffer = SpannableStringBuilder()
@@ -213,6 +215,18 @@ class AIFixLiveProgress(private val context: Context) {
       }
     }
 
+    override fun onFileDiff(
+      filePath: String,
+      fileName: String,
+      previousContent: String?,
+      newContent: String,
+      success: Boolean,
+    ) {
+      runOnUi {
+        appendDiffCard(filePath, fileName, previousContent, newContent, success)
+      }
+    }
+
     override fun onStreamChunk(delta: String, fullSoFar: String) {
       streamedReply = fullSoFar
       val now = System.currentTimeMillis()
@@ -279,6 +293,145 @@ class AIFixLiveProgress(private val context: Context) {
       }
     }
   }
+
+  /**
+   * Build a per-file diff card and append it to the diff container. Each card
+   * is a small MaterialCardView with: filename header (mono, bold), +/- stat
+   * line, and a horizontally-scrollable colored diff body. The diff body is
+   * collapsed to ~40 lines initially with a tap-to-expand affordance.
+   */
+  private fun appendDiffCard(
+    filePath: String,
+    fileName: String,
+    previousContent: String?,
+    newContent: String,
+    success: Boolean,
+  ) {
+    diffsHeader.visibility = View.VISIBLE
+    val ctx = context
+
+    val rendered = try {
+      com.tom.rv2ide.artificial.diff.DiffRenderer.render(previousContent, newContent)
+    } catch (t: Throwable) {
+      android.util.Log.w("AIFixLiveProgress", "Diff render failed for $filePath: ${t.message}")
+      return
+    }
+
+    val card = com.google.android.material.card.MaterialCardView(ctx).apply {
+      layoutParams = android.widget.LinearLayout.LayoutParams(
+        android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+      ).apply { topMargin = dp(6) }
+      radius = dp(10).toFloat()
+      cardElevation = 0f
+      strokeWidth = dp(1)
+      strokeColor = 0xFF8E8E93.toInt() and 0x40FFFFFF.toInt()
+    }
+
+    val inner = android.widget.LinearLayout(ctx).apply {
+      orientation = android.widget.LinearLayout.VERTICAL
+      setPadding(dp(10), dp(8), dp(10), dp(8))
+    }
+
+    val header = android.widget.LinearLayout(ctx).apply {
+      orientation = android.widget.LinearLayout.HORIZONTAL
+      gravity = android.view.Gravity.CENTER_VERTICAL
+    }
+    val nameView = MaterialTextView(ctx).apply {
+      text = fileName
+      typeface = android.graphics.Typeface.MONOSPACE
+      setTypeface(typeface, android.graphics.Typeface.BOLD)
+      textSize = 13f
+      layoutParams = android.widget.LinearLayout.LayoutParams(
+        0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f,
+      )
+    }
+    val statView = MaterialTextView(ctx).apply {
+      val stat = "+${rendered.added} / -${rendered.removed}"
+      text = if (success) stat else "$stat (failed)"
+      textSize = 11f
+      setTextColor(if (success) 0xFF4CAF50.toInt() else 0xFFE57373.toInt())
+    }
+    header.addView(nameView)
+    header.addView(statView)
+
+    val pathView = MaterialTextView(ctx).apply {
+      text = filePath
+      textSize = 10f
+      setTextColor(0xFF888888.toInt())
+      setPadding(0, dp(2), 0, dp(4))
+    }
+
+    val diffBody = MaterialTextView(ctx).apply {
+      text = rendered.span
+      typeface = android.graphics.Typeface.MONOSPACE
+      textSize = 11f
+      setHorizontallyScrolling(true)
+      isHorizontalScrollBarEnabled = true
+      setTextIsSelectable(true)
+      // Initial collapse: max ~40 lines.
+      maxLines = 40
+      ellipsize = android.text.TextUtils.TruncateAt.END
+    }
+
+    val scroll = android.widget.HorizontalScrollView(ctx).apply {
+      isHorizontalScrollBarEnabled = true
+      addView(diffBody)
+    }
+
+    val totalLines = rendered.span.toString().count { it == '\n' }
+    val expandBtn = MaterialTextView(ctx).apply {
+      text = if (totalLines > 40) "Show all $totalLines lines" else ""
+      visibility = if (totalLines > 40) View.VISIBLE else View.GONE
+      textSize = 11f
+      setTextColor(0xFF6699CC.toInt())
+      setPadding(0, dp(4), 0, 0)
+      setOnClickListener {
+        if (diffBody.maxLines == 40) {
+          diffBody.maxLines = Int.MAX_VALUE
+          text = "Show less"
+        } else {
+          diffBody.maxLines = 40
+          text = "Show all $totalLines lines"
+        }
+      }
+    }
+
+    val copyBtn = MaterialTextView(ctx).apply {
+      text = "Copy diff"
+      textSize = 11f
+      setTextColor(0xFF6699CC.toInt())
+      setPadding(dp(12), dp(4), 0, 0)
+      setOnClickListener {
+        try {
+          val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+            as android.content.ClipboardManager
+          cm.setPrimaryClip(
+            android.content.ClipData.newPlainText("AI diff: $fileName", rendered.span.toString()),
+          )
+          appendLog("Copied diff for $fileName", LogTag.SUCCESS)
+        } catch (t: Throwable) {
+          appendLog("Could not copy diff: ${t.message}", LogTag.WARN)
+        }
+      }
+    }
+
+    val actionRow = android.widget.LinearLayout(ctx).apply {
+      orientation = android.widget.LinearLayout.HORIZONTAL
+      addView(expandBtn)
+      addView(copyBtn)
+    }
+
+    inner.addView(header)
+    inner.addView(pathView)
+    inner.addView(scroll)
+    inner.addView(actionRow)
+    card.addView(inner)
+    diffContainer.addView(card)
+  }
+
+  private fun dp(v: Int): Int =
+    (v * context.resources.displayMetrics.density).toInt()
 
   private fun renderReply(text: String) {
     val trimmed = text.trim()

@@ -42,12 +42,12 @@ object DiffPreviewDialog {
             val contentText = view.findViewById<MaterialTextView>(R.id.diffContent)
 
             pathText.text = filePath
-            val (added, removed, span) = renderDiff(oldContent.orEmpty(), newContent)
-            contentText.text = span
+            val rendered = DiffRenderer.render(oldContent, newContent)
+            contentText.text = rendered.span
             summaryText.text = if (oldContent == null) {
                 "Creating new file • ${newContent.lines().size} lines"
             } else {
-                "+$added / -$removed lines"
+                "+${rendered.added} / -${rendered.removed} lines"
             }
 
             val dialog: AlertDialog = MaterialAlertDialogBuilder(context)
@@ -73,13 +73,10 @@ object DiffPreviewDialog {
     }
 
     /**
-     * Returns Triple<addedLines, removedLines, formattedSpan>. The span is
-     * a unified-style diff: lines starting with `+ ` highlighted green, `- `
-     * red, ` ` (space) for context.
-     *
-     * Uses a classic LCS DP. Capped at 4000 lines per side to avoid pathological
-     * O(n²) blowups on huge files; beyond that we just show line-by-line replace.
+     * Kept for binary compatibility / potential reuse. New callers should
+     * use [DiffRenderer.render] directly.
      */
+    @Suppress("unused")
     private fun renderDiff(
         oldText: String,
         newText: String,

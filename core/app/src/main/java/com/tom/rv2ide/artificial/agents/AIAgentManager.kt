@@ -420,6 +420,9 @@ class AIAgentManager(private val context: Context) {
                         currentAgent?.recordModification(currentFile, previousContent, cleanedContent, success)
 
                         callback.onFileModified(currentFile, fileName, success)
+                        try {
+                            callback.onFileDiff(currentFile, fileName, previousContent, cleanedContent, success)
+                        } catch (_: Throwable) { /* never break modification flow on UI error */ }
                         delay(300)
 
                         modifications.add(BaseFileModification(currentFile, cleanedContent, writeResult))
@@ -455,6 +458,9 @@ class AIAgentManager(private val context: Context) {
                 currentAgent?.recordModification(currentFile, previousContent, cleanedContent, success)
 
                 callback.onFileModified(currentFile, fileName, success)
+                try {
+                    callback.onFileDiff(currentFile, fileName, previousContent, cleanedContent, success)
+                } catch (_: Throwable) { /* never break modification flow on UI error */ }
                 delay(300)
 
                 modifications.add(BaseFileModification(currentFile, cleanedContent, writeResult))
@@ -642,6 +648,19 @@ class AIAgentManager(private val context: Context) {
             previousContent: String?,
             newContent: String,
         ): Boolean = true
+
+        /**
+         * Fired right after a file has been written so live UIs can render a
+         * unified diff (red `-` / green `+`) of the change. [previousContent]
+         * is null when the file did not exist before. Default no-op.
+         */
+        fun onFileDiff(
+            filePath: String,
+            fileName: String,
+            previousContent: String?,
+            newContent: String,
+            success: Boolean,
+        ) {}
     }
 
     data class ModificationResult(
