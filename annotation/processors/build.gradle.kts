@@ -50,3 +50,11 @@ tasks.withType<KotlinCompile> {
     jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
   }
 }
+
+// Keep javac's target in sync with the Kotlin jvmTarget above so the build does
+// not fail with "Inconsistent JVM-target compatibility" when running under a
+// newer JDK (e.g. JDK 21 from Android Studio's bundled JBR).
+java {
+  sourceCompatibility = JavaVersion.VERSION_17
+  targetCompatibility = JavaVersion.VERSION_17
+}

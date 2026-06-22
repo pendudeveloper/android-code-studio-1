@@ -29,7 +29,7 @@ object BuildConfig {
   const val packageName = "com.tom.rv2ide"
 
   /** The compile SDK version. */
-  const val compileSdk = 34
+  const val compileSdk = 36
   
   /** The build tools version. */
   const val buildToolsVersion = "35.0.0"

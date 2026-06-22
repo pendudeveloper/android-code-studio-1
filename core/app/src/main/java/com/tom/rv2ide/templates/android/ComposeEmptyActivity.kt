@@ -78,7 +78,7 @@ class ComposeEmptyActivity : Template {
           packageHelper.setPackageIdBlocking(options.packageId)
 
           val sdkHelper = SdkVersionHelper.getInstance(context)
-          sdkHelper.setAllSdkVersionsBlocking(options.minSdk, 34, 34)
+          sdkHelper.setAllSdkVersionsBlocking(options.minSdk, 37, 37)
 
           val projectRoot = File(options.saveLocation, options.projectName)
           Log.d("ComposeEmptyActivity", "Project root: ${projectRoot.absolutePath}")
@@ -288,7 +288,7 @@ class ComposeEmptyActivity : Template {
                 DefaultConfig(
                     applicationId = packageHelper.getPackageId(),
                     minSdk = Options.OPT_MIN_SDK,
-                    targetSdk = 34,
+                    targetSdk = 37,
                     versionCode = 1,
                     versionName = "1.0",
                     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner",

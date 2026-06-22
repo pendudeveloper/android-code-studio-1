@@ -45,6 +45,31 @@ buildscript {
 tasks.configureEach {
     if (name.contains("desugar", ignoreCase = true)) {
         enabled = false
+
+        // The app relies on its own `com.tom.rv2ide.desugaring` plugin, so AGP's
+        // desugaring tasks are disabled. However, several downstream tasks declare
+        // these disabled tasks' outputs as REQUIRED inputs, e.g.:
+        //   - DexMergingTask (`mergeExt*Dex`) -> `desugar*FileDependencies` (a DIR)
+        //   - CompileArtProfileTask (`compile*ArtProfile`) ->
+        //       `l8DexDesugarLib*/baseline-prof.txt` (a FILE)
+        // Under Gradle 8's strict input-existence validation the build fails with
+        // "input file ... doesn't exist" because a disabled task never creates its
+        // outputs. Pre-create the missing outputs once the task graph is ready
+        // (before any task snapshots its inputs). Use a filename heuristic to pick
+        // file vs directory: outputs with a file extension are created as empty
+        // files, everything else as directories.
+        val disabledTask = this
+        gradle.taskGraph.whenReady {
+            disabledTask.outputs.files.files.forEach { output ->
+                if (output.exists()) return@forEach
+                if (output.extension.isEmpty()) {
+                    output.mkdirs()
+                } else {
+                    output.parentFile?.mkdirs()
+                    output.createNewFile()
+                }
+            }
+        }
     }
 }
 
@@ -78,8 +103,20 @@ android {
           val keyStorePath = "${rootProject.projectDir}/signing/signing-key.jks"
           val keyStoreFile = file(keyStorePath)
           
-          val signing_storePassword = System.getenv("SIGNING_STORE_PASSWORD") ?: ""
-          val signing_keyPassword = System.getenv("SIGNING_KEY_PASSWORD") ?: ""
+          // Resolve signing passwords from (in order): environment variables
+          // (used by CI), the gitignored local.properties `signing.*` keys
+          // (convenient for local/Android Studio builds, matching the CI script),
+          // Gradle properties, else "".
+          val localProps = Properties().apply {
+              val f = rootProject.file("local.properties")
+              if (f.exists()) f.inputStream().use { load(it) }
+          }
+          val signing_storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+              ?: localProps.getProperty("signing.storePassword")
+              ?: (project.findProperty("signing.storePassword") as String?) ?: ""
+          val signing_keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+              ?: localProps.getProperty("signing.keyPassword")
+              ?: (project.findProperty("signing.keyPassword") as String?) ?: ""
           
           storeFile = keyStoreFile
           storePassword = signing_storePassword
@@ -101,7 +138,8 @@ android {
     }
 
     release {
-      isShrinkResources = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       signingConfig = signingConfigs.getByName("custom")
     }
   }
